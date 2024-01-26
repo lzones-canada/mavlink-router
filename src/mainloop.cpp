@@ -34,6 +34,8 @@
 
 static std::atomic<bool> should_exit{false};
 
+#define MODEM_BOOST_FLAG    (0x01 << 6)
+
 Mainloop Mainloop::_instance{};
 bool Mainloop::_initialized = false;
 
@@ -155,9 +157,61 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
     return r;
 }
 
+void Mainloop::handle_modem_boost(const struct buffer *buf, const mavlink_payload_ctrl_t *payload_ctrl)
+{
+    // Modem Boost Command for P900
+    uint8_t modem_command[] = {0x0C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x23, 0x02, 0x04, 0x1D, 0x00, 0x00, 0x00};
+
+    // Initialize the buffer struct
+    struct buffer modem_buf;
+    // Set the length of the buffer
+    modem_buf.len = sizeof(modem_command);
+    // Set the data pointer to the modem command
+    modem_buf.data = modem_command;
+
+    // Trigger boost command
+    if (payload_ctrl->modem_boost == true) {
+        log_info("MODEM BOOST ENABLED");
+        // Power value @ Index 12 (30dBm -> 0x1E)
+        modem_buf.data[12] = 0x1E;
+        // Update CRC @ Index 13 & 14
+        modem_buf.data[13] = 0x10;
+        modem_buf.data[14] = 0x1F;
+        // Write the command to the modem
+        modem_uart->write_msg(&modem_buf);
+    // Disable boost command
+    } else {
+        log_info("MODEM BOOST DISABLED");
+        // Power value @ Index 12 (26dBm -> 0x1A)
+        modem_buf.data[12] = 0x1A;
+        // Update CRC @ Index 13 & 14
+        modem_buf.data[13] = 0xD3;
+        modem_buf.data[14] = 0x1E;
+        // Write the command to the modem
+        modem_uart->write_msg(&modem_buf);
+    }
+
+    return;
+}
+
 void Mainloop::route_msg(struct buffer *buf)
 {
     bool unknown = true;
+
+    // Special case for intercepting and handling GCS modem boost
+    if (buf->curr.msg_id == MAVLINK_MSG_ID_PAYLOAD_CTRL) {
+        
+        // Extract a pointer to mavlink_payload_ctrl_t from the payload data in buf
+        const mavlink_payload_ctrl_t *payload_ctrl = (mavlink_payload_ctrl_t *)buf->curr.payload;
+
+        // Check if the modem boost flag is set and if the modem UART is available
+        if(MODEM_BOOST_FLAG & payload_ctrl->flags && modem_uart != nullptr) {
+            handle_modem_boost(buf, payload_ctrl);
+        } else {
+            // log out if modem UART is not available
+            log_error("MODEM UART NOT FOUND");
+        }
+    }
 
     for (const auto &e : this->g_endpoints) {
         auto acceptState = e->accept_msg(buf);
@@ -373,10 +427,16 @@ bool Mainloop::add_endpoints(const Configuration &config)
         if (!uart->setup(conf)) {
             return false;
         }
-
-        g_endpoints.push_back(uart);
-        auto endpoint = g_endpoints.back();
-        this->add_fd(endpoint->fd, endpoint.get(), EPOLLIN);
+        // Don't add endpoint for our CLI UART modem device
+        //if (conf.name.find("CLI") == std::string::npos) {
+        if(conf.name != "CLI") {
+            g_endpoints.push_back(uart);
+            auto endpoint = g_endpoints.back();
+            this->add_fd(endpoint->fd, endpoint.get(), EPOLLIN);
+        }
+        else {
+            modem_uart = uart;
+        }
     }
 
     for (const auto &conf : config.udp_configs) {

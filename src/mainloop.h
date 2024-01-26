@@ -58,6 +58,7 @@ public:
     int remove_fd(int fd) const;
     int loop();
     void route_msg(struct buffer *buf);
+    void handle_modem_boost(const struct buffer *buf, const mavlink_payload_ctrl_t *payload_ctrl);
     void handle_tcp_connection();
     int write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf) const;
     void process_tcp_hangups();
@@ -134,4 +135,6 @@ private:
 
     static Mainloop _instance;
     static bool _initialized;
+
+    std::shared_ptr<UartEndpoint> modem_uart;
 };

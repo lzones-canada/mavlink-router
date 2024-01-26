@@ -6,6 +6,10 @@ single port or multiple endpoints depending on the target address. Connections
 can be made via UART, UDP or TCP (see the [endpoints chapter](#endpoints) for
 details).
 
+## Updating mavlink_c_library_v2 to match custom/latest message set on vehicle
+##   Run cmd from this dir:   /home/kfruson/Data/Work/ardupilot/modules/mavlink
+
+    $ python3 -m pymavlink.tools.mavgen --lang=C --wire-protocol=2.0 --output=/home/kfruson/Data/Work/mavlink-router/modules/mavlink_c_library_v2 message_definitions/v1.0/ardupilotmega.xml
 
 ## Compilation and Installation
 
