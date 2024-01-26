@@ -159,6 +159,12 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
 
 void Mainloop::handle_modem_boost(const struct buffer *buf, const mavlink_payload_ctrl_t *payload_ctrl)
 {
+    // log out if modem UART is not available
+    if (modem_uart == nullptr) {
+        log_error("MODEM UART NOT FOUND");
+        return;
+    }
+
     // Modem Boost Command for P900
     uint8_t modem_command[] = {0x0C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x23, 0x02, 0x04, 0x1D, 0x00, 0x00, 0x00};
 
@@ -200,16 +206,13 @@ void Mainloop::route_msg(struct buffer *buf)
 
     // Special case for intercepting and handling GCS modem boost
     if (buf->curr.msg_id == MAVLINK_MSG_ID_PAYLOAD_CTRL) {
-        
+
         // Extract a pointer to mavlink_payload_ctrl_t from the payload data in buf
         const mavlink_payload_ctrl_t *payload_ctrl = (mavlink_payload_ctrl_t *)buf->curr.payload;
 
         // Check if the modem boost flag is set and if the modem UART is available
-        if(MODEM_BOOST_FLAG & payload_ctrl->flags && modem_uart != nullptr) {
+        if(MODEM_BOOST_FLAG & payload_ctrl->flags) {
             handle_modem_boost(buf, payload_ctrl);
-        } else {
-            // log out if modem UART is not available
-            log_error("MODEM UART NOT FOUND");
         }
     }
 
