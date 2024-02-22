@@ -157,7 +157,7 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
     return r;
 }
 
-void Mainloop::handle_modem_boost(const struct buffer *buf, const mavlink_payload_ctrl_t *payload_ctrl)
+void Mainloop::handle_modem_boost(const struct buffer *buf, const mavlink_payload_ctrl_t *payload_ctrl, const std::shared_ptr<UartEndpoint> &modem_uart)
 {
     // log out if modem UART is not available
     if (modem_uart == nullptr) {
@@ -212,7 +212,9 @@ void Mainloop::route_msg(struct buffer *buf)
 
         // Check if the modem boost flag is set and if the modem UART is available
         if(MODEM_BOOST_FLAG & payload_ctrl->flags) {
-            handle_modem_boost(buf, payload_ctrl);
+            for (const auto &modem : this->gcs_modems) {
+                handle_modem_boost(buf, payload_ctrl, modem);
+            }
         }
     }
 
@@ -438,7 +440,7 @@ bool Mainloop::add_endpoints(const Configuration &config)
             this->add_fd(endpoint->fd, endpoint.get(), EPOLLIN);
         }
         else {
-            modem_uart = uart;
+            gcs_modems.push_back(uart);
         }
     }
 
