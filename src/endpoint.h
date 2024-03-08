@@ -235,6 +235,7 @@ public:
 
     std::string get_type() const { return this->_type; }
     std::string get_group_name() const { return this->_group_name; };
+    std::string get_name() const { return this->_name; }
 
     struct buffer rx_buf;
     struct buffer tx_buf;

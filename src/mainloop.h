@@ -60,7 +60,7 @@ public:
     void route_msg(struct buffer *buf);
     void handle_modem_boost(const struct buffer *buf, const mavlink_payload_ctrl_t *payload_ctrl, const std::shared_ptr<UartEndpoint> &modem_uart);
     void handle_tcp_connection();
-    int write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf) const;
+    int write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf);
     void process_tcp_hangups();
     Timeout *add_timeout(uint32_t timeout_msec, std::function<bool(void *)> cb, const void *data);
     void del_timeout(Timeout *t);
@@ -78,6 +78,17 @@ public:
 
     int epollfd = -1;
     bool should_process_tcp_hangups = false;
+
+    /*
+     * Variables for modem switching 
+     */
+    bool port_modem = true;
+    bool stbd_modem = false;
+
+    bool writeToPort;
+    bool writeToStbd;
+    bool writeToBoth;
+    uint8_t writeCounter = 0;
 
     /*
      * Return singleton for this class, tied to the main thread. It needds to

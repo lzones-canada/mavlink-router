@@ -142,9 +142,55 @@ int Mainloop::remove_fd(int fd) const
     return 0;
 }
 
-int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf) const
+int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf)
 {
-    int r = e->write_msg(buf);
+    // reader result.
+    int r = 0;
+
+    // Check if current endpoint is UartEndpoint
+    auto uartEndpoint = std::dynamic_pointer_cast<UartEndpoint>(e);
+
+    // Custom action for our GCS Modems if UartEndpoint.
+    if (uartEndpoint) {
+
+        // Determine the current write mode based on our current endpoint.
+        writeToPort = port_modem && !stbd_modem && uartEndpoint->get_name() == "port_modem";
+        writeToStbd = stbd_modem && !port_modem && uartEndpoint->get_name() == "stbd_modem";
+
+        // Modem switching between Port and Stbd when "Both"
+        if(writeToBoth) {
+            // Increase counter when on Port
+            if(writeToPort) {
+                writeCounter++;
+            }
+            // Increase counter when on Stbd
+            else if (writeToStbd) {
+                writeCounter++;
+            }
+            // Switch modem every 2nd message
+            if (writeCounter > 0 && writeCounter % 2 == 0) {
+                port_modem = !port_modem;
+                stbd_modem = !stbd_modem;
+            }
+            // Reset our counter when back to Port and skip the first message out of Port as this was causing duplicate.
+            else if(writeCounter > 4) {
+                writeCounter = 0;
+                writeToPort = false;
+            }
+        }
+
+        // Only write out to respective modem when we have determined we are on it from above logic.
+        if (writeToPort) {
+            r = uartEndpoint->write_msg(buf);
+        }
+        else if (writeToStbd) {
+            r = uartEndpoint->write_msg(buf);
+        }
+
+    // Handle non-UartEndpoint here - Proceed as before.
+    } else {
+        r = e->write_msg(buf);
+    }
 
     /*
      * If endpoint would block, add EPOLLOUT event to get notified when it's
