@@ -34,7 +34,6 @@
 
 static std::atomic<bool> should_exit{false};
 
-#define MODEM_BOOST_FLAG    (0x01 << 6)
 
 Mainloop Mainloop::_instance{};
 bool Mainloop::_initialized = false;
@@ -142,6 +141,90 @@ int Mainloop::remove_fd(int fd) const
     return 0;
 }
 
+int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint, const struct buffer *buf)
+{
+    // reader result.
+    int r = 0;
+
+    // Determine the current write mode based on our current endpoint.
+    writeToPort = uartEndpoint->get_name() == "port_modem";
+    writeToStbd = uartEndpoint->get_name() == "stbd_modem";
+
+    // Handle actions based on current state
+    switch (modemState) {
+        case PORT_TX:
+            // Confirm we are on our endpoint for message sending
+            if(writeToPort) {
+                r = uartEndpoint->write_msg(buf);
+                log_warning("PORT_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
+                log_warning(" ");
+                prev_port_modem = true;
+                prev_stbd_modem = false;
+            }
+            break;
+        case STBD_TX:
+            if(writeToStbd) {
+                r = uartEndpoint->write_msg(buf);
+                log_warning("STBD_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
+                log_warning(" ");
+                prev_port_modem = false;
+                prev_stbd_modem = true;
+            }
+            break;
+        case BOTH_TX:
+        // Transmit the message from both modems
+        if (writeToPort && prev_port_modem) {
+            if (buf->curr.seq_id != lastSeqIdStbd) {
+                r = uartEndpoint->write_msg(buf);
+                log_warning("PORT_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
+                lastSeqIdPort = buf->curr.seq_id;
+                messageCounter++;
+                // Switch to the Stbd modem
+                if (messageCounter % 2 == 0) {
+                    prev_port_modem = false;
+                    prev_stbd_modem = true;
+                    log_warning(" ");
+                }
+            } else {
+                log_warning("PORT_TX: Skipping duplicate message with seq_id: %u", buf->curr.seq_id);
+            }
+        } else if (writeToStbd && prev_stbd_modem) {
+            if (buf->curr.seq_id != lastSeqIdPort) {
+                r = uartEndpoint->write_msg(buf);
+                log_warning("STBD_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
+                lastSeqIdStbd = buf->curr.seq_id;
+                messageCounter++;
+                // Switch to the Port modem
+                if (messageCounter % 2 == 0) {
+                    prev_port_modem = true;
+                    prev_stbd_modem = false;
+                    log_warning(" ");
+                }
+            } else {
+                log_warning("STBD_TX: Skipping duplicate message with seq_id: %u", buf->curr.seq_id);
+            }
+        }
+        break;
+        case BOTH_OFF:
+            // Transmit a message just once to indicate the modems are turning off
+            // and then continue without further transmitting messages
+            if (prev_port_modem) {
+                r = uartEndpoint->write_msg(buf);
+                log_warning("BOTH_OFF: Transmitting from Port modem");
+            } else if (prev_stbd_modem) {
+                r = uartEndpoint->write_msg(buf);
+                log_warning("BOTH_OFF: Transmitting from Stbd modem");
+            }
+            // Update the state to indicate that both modems are off
+            prev_port_modem = false;
+            prev_stbd_modem = false;
+            break;
+    }
+
+    return r;
+
+}
+
 int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf)
 {
     // reader result.
@@ -152,43 +235,10 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
 
     // Custom action for our GCS Modems if UartEndpoint.
     if (uartEndpoint) {
-
-        // Determine the current write mode based on our current endpoint.
-        writeToPort = port_modem && !stbd_modem && uartEndpoint->get_name() == "port_modem";
-        writeToStbd = stbd_modem && !port_modem && uartEndpoint->get_name() == "stbd_modem";
-
-        // Modem switching between Port and Stbd when "Both"
-        if(writeToBoth) {
-            // Increase counter when on Port
-            if(writeToPort) {
-                writeCounter++;
-            }
-            // Increase counter when on Stbd
-            else if (writeToStbd) {
-                writeCounter++;
-            }
-            // Switch modem every 2nd message
-            if (writeCounter > 0 && writeCounter % 2 == 0) {
-                port_modem = !port_modem;
-                stbd_modem = !stbd_modem;
-            }
-            // Reset our counter when back to Port and skip the first message out of Port as this was causing duplicate.
-            else if(writeCounter > 4) {
-                writeCounter = 0;
-                writeToPort = false;
-            }
-        }
-
-        // Only write out to respective modem when we have determined we are on it from above logic.
-        if (writeToPort) {
-            r = uartEndpoint->write_msg(buf);
-        }
-        else if (writeToStbd) {
-            r = uartEndpoint->write_msg(buf);
-        }
-
-    // Handle non-UartEndpoint here - Proceed as before.
+        // Handle UartEndpoint here - Custom action for our GCS Modems.   
+        r = handle_modem_tx(uartEndpoint, buf);
     } else {
+        // Handle non-UartEndpoint here - Proceed as before.
         r = e->write_msg(buf);
     }
 
@@ -203,7 +253,7 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
     return r;
 }
 
-void Mainloop::handle_modem_boost(const struct buffer *buf, const mavlink_payload_ctrl_t *payload_ctrl, const std::shared_ptr<UartEndpoint> &modem_uart)
+void Mainloop::handle_modem_boost(const struct buffer *buf, const bool boost_modem, const std::shared_ptr<UartEndpoint> &modem_uart)
 {
     // log out if modem UART is not available
     if (modem_uart == nullptr) {
@@ -222,7 +272,7 @@ void Mainloop::handle_modem_boost(const struct buffer *buf, const mavlink_payloa
     modem_buf.data = modem_command;
 
     // Trigger boost command
-    if (payload_ctrl->modem_boost == true) {
+    if (boost_modem) {
         log_info("MODEM BOOST ENABLED");
         // Power value @ Index 12 (30dBm -> 0x1E)
         modem_buf.data[12] = 0x1E;
@@ -246,22 +296,48 @@ void Mainloop::handle_modem_boost(const struct buffer *buf, const mavlink_payloa
     return;
 }
 
+void Mainloop::intercept_handle_station_ctrl_msg(const struct buffer *buf) 
+{
+    // Extract a pointer to mavlink_station_ctrl_t from the payload data in buf
+    const mavlink_station_ctrl_t *station_ctrl = (mavlink_station_ctrl_t *)buf->curr.payload;
+
+    // Set the port_modem and stbd_modem flags based on the station control flags
+    port_modem  = station_ctrl->flags & STATION_CTRL_FLAGS::TX_PORT_MODEM;
+    stbd_modem  = station_ctrl->flags & STATION_CTRL_FLAGS::TX_STBD_MODEM;
+    modem_boost = station_ctrl->flags & STATION_CTRL_FLAGS::MODEM_BOOST;
+
+    // Check if the modem boost flag is set and if the modem UART is available
+    if(modem_boost != prev_modem_boost) {
+        for (const auto &modem_uart : this->gcs_modems) {
+            handle_modem_boost(buf, modem_boost, modem_uart);
+        }
+        // track state of the modem boost.
+        prev_modem_boost = modem_boost;
+    }
+
+    // Update the state machine based on the current state of the modems
+    if (port_modem && !stbd_modem) {
+        modemState = PORT_TX;
+    } else if (!port_modem && stbd_modem) {
+        modemState = STBD_TX;
+    } else if (port_modem && stbd_modem) {
+        modemState = BOTH_TX;
+        messageCounter = 0;
+    } else {
+        modemState = BOTH_OFF;
+    }
+
+    return;
+}
+
 void Mainloop::route_msg(struct buffer *buf)
 {
     bool unknown = true;
 
-    // Special case for intercepting and handling GCS modem boost
-    if (buf->curr.msg_id == MAVLINK_MSG_ID_PAYLOAD_CTRL) {
-
-        // Extract a pointer to mavlink_payload_ctrl_t from the payload data in buf
-        const mavlink_payload_ctrl_t *payload_ctrl = (mavlink_payload_ctrl_t *)buf->curr.payload;
-
-        // Check if the modem boost flag is set and if the modem UART is available
-        if(MODEM_BOOST_FLAG & payload_ctrl->flags) {
-            for (const auto &modem : this->gcs_modems) {
-                handle_modem_boost(buf, payload_ctrl, modem);
-            }
-        }
+    // Special case for intercepting and handling GCS Station Modem Control Messages
+    if (buf->curr.msg_id == MAVLINK_MSG_ID_STATION_CTRL) {
+        // Intercept and handle the station control message
+        intercept_handle_station_ctrl_msg(buf);
     }
 
     for (const auto &e : this->g_endpoints) {

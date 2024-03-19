@@ -30,6 +30,29 @@
 #include "timeout.h"
 #include "ulog.h"
 
+// Station Control Flags for which value is valid.
+struct STATION_CTRL_FLAGS
+{
+    enum
+    {
+        TX_PORT_MODEM = (0x01 << 7),
+        TX_STBD_MODEM = (0x01 << 6),
+        MODEM_BOOST   = (0x01 << 5),
+        RESERVED5     = (0x01 << 4),
+        RESERVED4     = (0x01 << 3),
+        RESERVED3     = (0x01 << 2),
+        RESERVED2     = (0x01 << 1),
+        RESERVED1     = (0x01 << 0)
+    };
+};
+
+enum ModemState {
+    PORT_TX,
+    STBD_TX,
+    BOTH_TX,
+    BOTH_OFF
+};
+
 struct Configuration {
     std::string conf_file_name;        ///< CLI "conf-file" only!
     std::string conf_dir;              ///< CLI "conf-dir" only!
@@ -58,9 +81,11 @@ public:
     int remove_fd(int fd) const;
     int loop();
     void route_msg(struct buffer *buf);
-    void handle_modem_boost(const struct buffer *buf, const mavlink_payload_ctrl_t *payload_ctrl, const std::shared_ptr<UartEndpoint> &modem_uart);
+    void intercept_handle_station_ctrl_msg(const struct buffer *buf);
+    void handle_modem_boost(const struct buffer *buf, const bool boost_modem, const std::shared_ptr<UartEndpoint> &modem_uart);
     void handle_tcp_connection();
     int write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf);
+    int handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint, const struct buffer *buf);
     void process_tcp_hangups();
     Timeout *add_timeout(uint32_t timeout_msec, std::function<bool(void *)> cb, const void *data);
     void del_timeout(Timeout *t);
@@ -82,13 +107,20 @@ public:
     /*
      * Variables for modem switching 
      */
-    bool port_modem = true;
-    bool stbd_modem = false;
+    bool port_modem  = true;
+    bool prev_port_modem;
+    bool stbd_modem;
+    bool prev_stbd_modem;
+    bool modem_boost;
+    bool prev_modem_boost;
+
+    ModemState modemState = PORT_TX;  // Initial state of the modems
 
     bool writeToPort;
     bool writeToStbd;
-    bool writeToBoth;
-    uint8_t writeCounter = 0;
+    int messageCounter = 0;
+    uint8_t lastSeqIdPort = 0;
+    uint8_t lastSeqIdStbd = 0;
 
     /*
      * Return singleton for this class, tied to the main thread. It needds to
