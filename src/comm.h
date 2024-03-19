@@ -36,6 +36,7 @@ struct buffer {
         uint32_t msg_id;
         int target_sysid;
         int target_compid;
+        uint8_t seq_id;
         uint8_t src_sysid;
         uint8_t src_compid;
         uint8_t payload_len;
