@@ -156,8 +156,8 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint,
             // Confirm we are on our endpoint for message sending
             if(writeToPort) {
                 r = uartEndpoint->write_msg(buf);
-                log_warning("PORT_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
-                log_warning(" ");
+                log_debug("PORT_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
+                log_debug(" ");
                 prev_port_modem = true;
                 prev_stbd_modem = false;
             }
@@ -165,8 +165,8 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint,
         case STBD_TX:
             if(writeToStbd) {
                 r = uartEndpoint->write_msg(buf);
-                log_warning("STBD_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
-                log_warning(" ");
+                log_debug("STBD_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
+                log_debug(" ");
                 prev_port_modem = false;
                 prev_stbd_modem = true;
             }
@@ -176,32 +176,32 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint,
         if (writeToPort && prev_port_modem) {
             if (buf->curr.seq_id != lastSeqIdStbd) {
                 r = uartEndpoint->write_msg(buf);
-                log_warning("PORT_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
+                log_debug("PORT_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
                 lastSeqIdPort = buf->curr.seq_id;
                 messageCounter++;
                 // Switch to the Stbd modem
                 if (messageCounter % 2 == 0) {
                     prev_port_modem = false;
                     prev_stbd_modem = true;
-                    log_warning(" ");
+                    log_debug(" ");
                 }
             } else {
-                log_warning("PORT_TX: Skipping duplicate message with seq_id: %u", buf->curr.seq_id);
+                log_debug("PORT_TX: Skipping duplicate message with seq_id: %u", buf->curr.seq_id);
             }
         } else if (writeToStbd && prev_stbd_modem) {
             if (buf->curr.seq_id != lastSeqIdPort) {
                 r = uartEndpoint->write_msg(buf);
-                log_warning("STBD_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
+                log_debug("STBD_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
                 lastSeqIdStbd = buf->curr.seq_id;
                 messageCounter++;
                 // Switch to the Port modem
                 if (messageCounter % 2 == 0) {
                     prev_port_modem = true;
                     prev_stbd_modem = false;
-                    log_warning(" ");
+                    log_debug(" ");
                 }
             } else {
-                log_warning("STBD_TX: Skipping duplicate message with seq_id: %u", buf->curr.seq_id);
+                log_debug("STBD_TX: Skipping duplicate message with seq_id: %u", buf->curr.seq_id);
             }
         }
         break;
@@ -210,10 +210,10 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint,
             // and then continue without further transmitting messages
             if (prev_port_modem) {
                 r = uartEndpoint->write_msg(buf);
-                log_warning("BOTH_OFF: Transmitting from Port modem");
+                log_debug("BOTH_OFF: Transmitting from Port modem");
             } else if (prev_stbd_modem) {
                 r = uartEndpoint->write_msg(buf);
-                log_warning("BOTH_OFF: Transmitting from Stbd modem");
+                log_debug("BOTH_OFF: Transmitting from Stbd modem");
             }
             // Update the state to indicate that both modems are off
             prev_port_modem = false;
@@ -222,7 +222,6 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint,
     }
 
     return r;
-
 }
 
 int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf)
