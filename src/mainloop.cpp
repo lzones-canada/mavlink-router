@@ -302,7 +302,8 @@ void Mainloop::intercept_handle_station_ctrl_msg(const struct buffer *buf)
 
     // Set the port_modem and stbd_modem flags based on the station control flags
     port_modem  = station_ctrl->flags & STATION_CTRL_FLAGS::TX_PORT_MODEM;
-    stbd_modem  = station_ctrl->flags & STATION_CTRL_FLAGS::TX_STBD_MODEM;
+    // FIXME: Temporary disabling STBD modem (This still alows for Port TX On/Off)
+    stbd_modem  = false; // stbd_modem  = station_ctrl->flags & STATION_CTRL_FLAGS::TX_STBD_MODEM;
     modem_boost = station_ctrl->flags & STATION_CTRL_FLAGS::MODEM_BOOST;
 
     // Check if the modem boost flag is set and if the modem UART is available
