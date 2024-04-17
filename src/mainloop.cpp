@@ -157,7 +157,6 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint,
             if(writeToPort) {
                 r = uartEndpoint->write_msg(buf);
                 log_debug("PORT_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
-                log_debug(" ");
                 prev_port_modem = true;
                 prev_stbd_modem = false;
             }
@@ -166,7 +165,6 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint,
             if(writeToStbd) {
                 r = uartEndpoint->write_msg(buf);
                 log_debug("STBD_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
-                log_debug(" ");
                 prev_port_modem = false;
                 prev_stbd_modem = true;
             }
@@ -183,7 +181,6 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint,
                 if (messageCounter % 2 == 0) {
                     prev_port_modem = false;
                     prev_stbd_modem = true;
-                    log_debug(" ");
                 }
             } else {
                 log_debug("PORT_TX: Skipping duplicate message with seq_id: %u", buf->curr.seq_id);
@@ -198,7 +195,6 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint,
                 if (messageCounter % 2 == 0) {
                     prev_port_modem = true;
                     prev_stbd_modem = false;
-                    log_debug(" ");
                 }
             } else {
                 log_debug("STBD_TX: Skipping duplicate message with seq_id: %u", buf->curr.seq_id);
@@ -554,15 +550,16 @@ bool Mainloop::add_endpoints(const Configuration &config)
         if (!uart->setup(conf)) {
             return false;
         }
-        // Don't add endpoint for our CLI UART modem device
-        //if (conf.name.find("CLI") == std::string::npos) {
-        if(conf.name != "CLI") {
+
+        // Check if the UART is a GCS Modem tagged with "diagnostic"
+        if (str.find("diagnostic") != std::string::npos) { 
+            gcs_modems.push_back(uart);
+        }
+        // Proceed as before - Don't add endpoint for our modem UARTs
+        else {
             g_endpoints.push_back(uart);
             auto endpoint = g_endpoints.back();
             this->add_fd(endpoint->fd, endpoint.get(), EPOLLIN);
-        }
-        else {
-            gcs_modems.push_back(uart);
         }
     }
 
