@@ -552,7 +552,7 @@ bool Mainloop::add_endpoints(const Configuration &config)
         }
 
         // Check if the UART is a GCS Modem tagged with "diagnostic"
-        if (str.find("diagnostic") != std::string::npos) { 
+        if (conf.name.find("diagnostic") != std::string::npos) {
             gcs_modems.push_back(uart);
         }
         // Proceed as before - Don't add endpoint for our modem UARTs
