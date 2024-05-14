@@ -204,16 +204,17 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint,
         case BOTH_OFF:
             // Transmit a message just once to indicate the modems are turning off
             // and then continue without further transmitting messages
-            if (prev_port_modem) {
+            if (writeToPort && prev_port_modem) {
                 r = uartEndpoint->write_msg(buf);
-                log_debug("BOTH_OFF: Transmitting from Port modem");
-            } else if (prev_stbd_modem) {
+                // Update the state to indicate that both modems are off
+                prev_port_modem = false;
+                log_debug("BOTH_OFF[%s]: msg_id:%u, seq:%u, sysid:%u", uartEndpoint->get_name().c_str(),buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
+            } else if (writeToStbd && prev_stbd_modem) {
                 r = uartEndpoint->write_msg(buf);
-                log_debug("BOTH_OFF: Transmitting from Stbd modem");
+                // Update the state to indicate that both modems are off
+                prev_stbd_modem = false;
+                log_debug("BOTH_OFF[%s]: msg_id:%u, seq:%u, sysid:%u", uartEndpoint->get_name().c_str(),buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
             }
-            // Update the state to indicate that both modems are off
-            prev_port_modem = false;
-            prev_stbd_modem = false;
             break;
     }
 
@@ -229,8 +230,8 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
     auto uartEndpoint = std::dynamic_pointer_cast<UartEndpoint>(e);
 
     // Custom action for our GCS Modems if UartEndpoint.
-    if (uartEndpoint) {
-        // Handle UartEndpoint here - Custom action for our GCS Modems.   
+    if (uartEndpoint && uartEndpoint->get_name()!="tracker") {
+        // Handle UartEndpoint here - Custom action for our GCS Modems.
         r = handle_modem_tx(uartEndpoint, buf);
     } else {
         // Handle non-UartEndpoint here - Proceed as before.
@@ -298,8 +299,9 @@ void Mainloop::intercept_handle_station_ctrl_msg(const struct buffer *buf)
 
     // Set the port_modem and stbd_modem flags based on the station control flags
     port_modem  = station_ctrl->flags & STATION_CTRL_FLAGS::TX_PORT_MODEM;
-    // FIXME: Temporary disabling STBD modem (This still alows for Port TX On/Off)
-    stbd_modem  = false; // stbd_modem  = station_ctrl->flags & STATION_CTRL_FLAGS::TX_STBD_MODEM;
+    stbd_modem  = station_ctrl->flags & STATION_CTRL_FLAGS::TX_STBD_MODEM;
+    // TODO: Temporary disabling STBD modem (This still alows for Port TX On/Off)
+    //stbd_modem = false; 
     modem_boost = station_ctrl->flags & STATION_CTRL_FLAGS::MODEM_BOOST;
 
     // Check if the modem boost flag is set and if the modem UART is available
