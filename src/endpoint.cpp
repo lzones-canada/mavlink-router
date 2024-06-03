@@ -243,8 +243,24 @@ int Endpoint::handle_read()
                           buf.curr.src_compid);
             }
         } else {
-            _add_sys_comp_id(buf.curr.src_sysid, buf.curr.src_compid);
-            Mainloop::get_instance().route_msg(&buf);
+            // Only route known mavlink messages..
+            if (r == ReadOk) {
+                _add_sys_comp_id(buf.curr.src_sysid, buf.curr.src_compid);
+                Mainloop::get_instance().route_msg(&buf);
+            // Discard anything else..
+            } else if (r == ReadUnkownMsg) {
+                if (Log::get_max_level() >= Log::Level::DEBUG) {
+                    log_debug("> %s [%d]%s: Message %u to %d/%d from %u/%u discarded: No entry in message table",
+                              _type.c_str(),
+                              fd,
+                              _name.c_str(),
+                              buf.curr.msg_id,
+                              buf.curr.target_sysid,
+                              buf.curr.target_compid,
+                              buf.curr.src_sysid,
+                              buf.curr.src_compid);
+                }
+            }
         }
     }
 
@@ -472,6 +488,8 @@ void Endpoint::_add_sys_comp_id(uint8_t sysid, uint8_t compid)
                  fd);
     }
     _sys_comp_ids.push_back(sys_comp_id);
+
+    log_info("%s [%d]%s: Added sysid %u compid %u",_type.c_str(), fd, get_name().c_str(), sysid, compid);
 
     // add to grouped endpoints as well
     for (auto e : _group_members) {
