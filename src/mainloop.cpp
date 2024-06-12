@@ -269,7 +269,7 @@ void Mainloop::handle_modem_boost(const struct buffer *buf, const bool boost_mod
 
     // Trigger boost command
     if (boost_modem) {
-        log_info("MODEM BOOST ENABLED");
+        log_info("> %s [%d]%s: Enabled", modem_uart->get_type().c_str(), modem_uart->fd, modem_uart->get_name().c_str());
         // Power value @ Index 12 (30dBm -> 0x1E)
         modem_buf.data[12] = 0x1E;
         // Update CRC @ Index 13 & 14
@@ -279,7 +279,7 @@ void Mainloop::handle_modem_boost(const struct buffer *buf, const bool boost_mod
         modem_uart->write_msg(&modem_buf);
     // Disable boost command
     } else {
-        log_info("MODEM BOOST DISABLED");
+        log_info("> %s [%d]%s: Disabled", modem_uart->get_type().c_str(), modem_uart->fd, modem_uart->get_name().c_str());
         // Power value @ Index 12 (26dBm -> 0x1A)
         modem_buf.data[12] = 0x1A;
         // Update CRC @ Index 13 & 14
@@ -553,7 +553,7 @@ bool Mainloop::add_endpoints(const Configuration &config)
             return false;
         }
 
-        // Check if the UART is a GCS Modem tagged with "diagnostic"
+        // Check if the UART is a GCS Modem tagged with "boost"
         if (conf.name.find("boost") != std::string::npos) {
             gcs_modems.push_back(uart);
         }
