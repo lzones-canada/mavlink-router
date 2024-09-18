@@ -231,11 +231,11 @@ int Endpoint::handle_read()
         // check incoming message filters
         if (!allowed_by_dedup(&buf)) {
             if (Log::get_max_level() >= Log::Level::DEBUG) {
-                log_debug("Message %u discarded by de-duplication", buf.curr.msg_id);
+                log_trace("Message %u discarded by de-duplication", buf.curr.msg_id);
             }
         } else if (!allowed_by_incoming_filters(&buf)) {
             if (Log::get_max_level() >= Log::Level::DEBUG) {
-                log_debug("Message %u to %d/%d from %u/%u discarded by incoming filters",
+                log_trace("Message %u to %d/%d from %u/%u discarded by incoming filters",
                           buf.curr.msg_id,
                           buf.curr.target_sysid,
                           buf.curr.target_compid,
@@ -308,7 +308,7 @@ int Endpoint::read_msg(struct buffer *pbuf)
             return r;
         }
 
-        log_debug("> %s [%d]%s: Got %zd bytes", _type.c_str(), fd, _name.c_str(), r);
+        log_trace("> %s [%d]%s: Got %zd bytes", _type.c_str(), fd, _name.c_str(), r);
         rx_buf.len += r;
     }
 
@@ -427,7 +427,7 @@ int Endpoint::read_msg(struct buffer *pbuf)
     target_compid = -1;
 
     if (msg_entry == nullptr) {
-        log_debug("%s [%d]%s: No message entry for %u", _type.c_str(), fd, _name.c_str(), msg_id);
+        log_trace("%s [%d]%s: No message entry for %u", _type.c_str(), fd, _name.c_str(), msg_id);
     } else {
         if (msg_entry->flags & MAV_MSG_ENTRY_FLAG_HAVE_TARGET_SYSTEM) {
             // if target_system is 0, it may have been trimmed out on mavlink2
@@ -520,8 +520,8 @@ bool Endpoint::has_sys_comp_id(unsigned sys_comp_id) const
 
 Endpoint::AcceptState Endpoint::accept_msg(const struct buffer *pbuf) const
 {
-    if (Log::get_max_level() >= Log::Level::DEBUG) {
-        log_debug("Endpoint [%d]%s: got message %u to %d/%d from %u/%u",
+    if (Log::get_max_level() >= Log::Level::TRACE) {
+        log_trace("Endpoint [%d]%s: got message %u to %d/%d from %u/%u",
                   fd,
                   _name.c_str(),
                   pbuf->curr.msg_id,
@@ -529,9 +529,9 @@ Endpoint::AcceptState Endpoint::accept_msg(const struct buffer *pbuf) const
                   pbuf->curr.target_compid,
                   pbuf->curr.src_sysid,
                   pbuf->curr.src_compid);
-        log_debug("\tKnown components:");
+        log_trace("\tKnown components:");
         for (const auto &id : _sys_comp_ids) {
-            log_debug("\t\t%u/%u", (id >> 8), id & 0xff);
+            log_trace("\t\t%u/%u", (id >> 8), id & 0xff);
         }
     }
 
@@ -1042,7 +1042,7 @@ int UartEndpoint::write_msg(const struct buffer *pbuf)
                   pbuf->len);
     }
 
-    log_debug("UART [%d]%s: Wrote %zd bytes", fd, _name.c_str(), r);
+    log_trace("UART [%d]%s: Wrote %zd bytes", fd, _name.c_str(), r);
 
     return r;
 }
@@ -1368,7 +1368,7 @@ int UdpEndpoint::write_msg(const struct buffer *pbuf)
     }
 
     if (!sock_connected) {
-        log_debug("UDP %s: No one ever connected to us. No one to write for", _name.c_str());
+        log_trace("UDP %s: No one ever connected to us. No one to write for", _name.c_str());
         return 0;
     }
 
@@ -1392,7 +1392,7 @@ int UdpEndpoint::write_msg(const struct buffer *pbuf)
                   pbuf->len);
     }
 
-    log_debug("UDP [%d]%s: Wrote %zd bytes", fd, _name.c_str(), r);
+    log_trace("UDP [%d]%s: Wrote %zd bytes", fd, _name.c_str(), r);
 
     return r;
 }
@@ -1751,7 +1751,7 @@ int TcpEndpoint::write_msg(const struct buffer *pbuf)
                   pbuf->len);
     }
 
-    log_debug("TCP [%d]%s: Wrote %zd bytes", fd, _name.c_str(), r);
+    log_trace("TCP [%d]%s: Wrote %zd bytes", fd, _name.c_str(), r);
 
     return r;
 }
