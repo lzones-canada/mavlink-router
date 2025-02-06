@@ -141,21 +141,21 @@ int Mainloop::remove_fd(int fd) const
     return 0;
 }
 
-int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint, const struct buffer *buf)
+int Mainloop::handle_modem_tx(const std::shared_ptr<UdpEndpoint> &udpEndpoint, const struct buffer *buf)
 {
     // reader result.
     int r = 0;
 
     // Determine the current write mode based on our current endpoint.
-    writeToPort = uartEndpoint->get_name() == "port_modem";
-    writeToStbd = uartEndpoint->get_name() == "stbd_modem";
+    writeToPort = udpEndpoint->get_name() == "port_modem";
+    writeToStbd = udpEndpoint->get_name() == "stbd_modem";
 
     // Handle actions based on current state
     switch (modemState) {
         case PORT_TX:
             // Confirm we are on our endpoint for message sending
             if(writeToPort) {
-                r = uartEndpoint->write_msg(buf);
+                r = udpEndpoint->write_msg(buf);
                 log_debug("PORT_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
                 prev_port_modem = true;
                 prev_stbd_modem = false;
@@ -163,7 +163,7 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint,
             break;
         case STBD_TX:
             if(writeToStbd) {
-                r = uartEndpoint->write_msg(buf);
+                r = udpEndpoint->write_msg(buf);
                 log_debug("STBD_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
                 prev_port_modem = false;
                 prev_stbd_modem = true;
@@ -173,7 +173,7 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint,
         // Transmit the message from both modems
         if (writeToPort && prev_port_modem) {
             if (buf->curr.seq_id != lastSeqIdStbd) {
-                r = uartEndpoint->write_msg(buf);
+                r = udpEndpoint->write_msg(buf);
                 log_debug("PORT_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
                 lastSeqIdPort = buf->curr.seq_id;
                 messageCounter++;
@@ -187,7 +187,7 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint,
             }
         } else if (writeToStbd && prev_stbd_modem) {
             if (buf->curr.seq_id != lastSeqIdPort) {
-                r = uartEndpoint->write_msg(buf);
+                r = udpEndpoint->write_msg(buf);
                 log_debug("STBD_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
                 lastSeqIdStbd = buf->curr.seq_id;
                 messageCounter++;
@@ -205,17 +205,59 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint,
             // Transmit a message just once to indicate the modems are turning off
             // and then continue without further transmitting messages
             if (writeToPort && prev_port_modem) {
-                r = uartEndpoint->write_msg(buf);
+                r = udpEndpoint->write_msg(buf);
                 // Update the state to indicate that both modems are off
                 prev_port_modem = false;
-                log_debug("BOTH_OFF[%s]: msg_id:%u, seq:%u, sysid:%u", uartEndpoint->get_name().c_str(),buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
+                log_debug("BOTH_OFF[%s]: msg_id:%u, seq:%u, sysid:%u", udpEndpoint->get_name().c_str(),buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
             } else if (writeToStbd && prev_stbd_modem) {
-                r = uartEndpoint->write_msg(buf);
+                r = udpEndpoint->write_msg(buf);
                 // Update the state to indicate that both modems are off
                 prev_stbd_modem = false;
-                log_debug("BOTH_OFF[%s]: msg_id:%u, seq:%u, sysid:%u", uartEndpoint->get_name().c_str(),buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
+                log_debug("BOTH_OFF[%s]: msg_id:%u, seq:%u, sysid:%u", udpEndpoint->get_name().c_str(),buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
             }
             break;
+    }
+
+    return r;
+}
+
+int Mainloop::convert_gps_to_mavlink1(const std::shared_ptr<UdpEndpoint>& udpEndpoint, const struct buffer* buf)
+{
+    int r = 0;
+
+    // Confirm current message is GPS_RAW_INT
+    if (buf->curr.msg_id == MAVLINK_MSG_ID_GPS_RAW_INT) 
+    {
+        // Temporary set to MAVlink1
+        mavlink_set_proto_version(MAVLINK_COMM_0, 1);
+
+        // Temporary buffer to store the outgoing MAVLink message
+        uint8_t data[MAVLINK_CORE_HEADER_LEN + MAVLINK_MSG_ID_GPS_RAW_INT_MIN_LEN] = {};
+        struct buffer buffer = {};
+
+        // Initialize MAV1 message
+        mavlink_message_t mav1_msg = {};
+        // Initialize GPS message for MAV1
+        mavlink_gps_raw_int_t gps_raw_int = {};
+
+        // Copy over payload and msg length
+        memmove(mav1_msg.payload64, buf->curr.payload, buf->curr.payload_len);
+        mav1_msg.len = buf->curr.payload_len;
+        
+        // Decode received MAVLink2 GPS_RAW_INT message
+        mavlink_msg_gps_raw_int_decode(&mav1_msg, &gps_raw_int);
+        // Encode the MAVLink 1 GPS_RAW_INT message
+        mavlink_msg_gps_raw_int_encode(buf->data[5], buf->data[6], &mav1_msg, &gps_raw_int);
+
+        // Serialize the MAVLink 1 message into the send buffer
+        buffer.len = mavlink_msg_to_send_buffer(data, &mav1_msg);
+        buffer.data = data;
+
+        // Write the message to the UDP endpoint
+        r = udpEndpoint->write_msg(&buffer);
+
+        // Set back to MAVlink2
+        mavlink_set_proto_version(MAVLINK_COMM_0, 2);
     }
 
     return r;
@@ -226,15 +268,17 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
     // reader result.
     int r = 0;
 
-    // Check if current endpoint is UartEndpoint
-    auto uartEndpoint = std::dynamic_pointer_cast<UartEndpoint>(e);
+    // Confirm endpoint is UdpEndpoint
+    auto udpEndpoint = std::dynamic_pointer_cast<UdpEndpoint>(e);
 
-    // Custom action for our GCS Modems if UartEndpoint.
-    if (uartEndpoint && uartEndpoint->get_name()!="tracker") {
-        // Handle UartEndpoint here - Custom action for our GCS Modems.
-        r = handle_modem_tx(uartEndpoint, buf);
+    // Custom action for GCS Modems
+    if (udpEndpoint && (udpEndpoint->get_name() == "port_modem" || udpEndpoint->get_name() == "stbd_modem")) {
+        r = handle_modem_tx(udpEndpoint, buf);
+    } else if (udpEndpoint && udpEndpoint->get_name() == "tracker") {
+        // Intercept GPS_RAW_INT for Tracker Endpoint (Convert MAV2 -> MAV1)
+        r = convert_gps_to_mavlink1(udpEndpoint, buf);
     } else {
-        // Handle non-UartEndpoint here - Proceed as before.
+        // Proceed as before.
         r = e->write_msg(buf);
     }
 
@@ -249,45 +293,46 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
     return r;
 }
 
-void Mainloop::handle_modem_boost(const struct buffer *buf, const bool boost_modem, const std::shared_ptr<UartEndpoint> &modem_uart)
+void Mainloop::handle_modem_boost(const struct buffer *buf, const bool boost_modem, const std::shared_ptr<UdpEndpoint> &modem_diag)
 {
     // log out if modem UART is not available
-    if (modem_uart == nullptr) {
-        log_error("MODEM UART NOT FOUND");
+    if (modem_diag == nullptr) {
+        log_error("MODEM ENDPOINT NOT FOUND");
         return;
     }
 
-    // Modem Boost Command for P900
-    uint8_t modem_command[] = {0x0C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x23, 0x02, 0x04, 0x1D, 0x00, 0x00, 0x00};
+    // Create and initialize the MODEM_CMD structure
+    MODEM_CMD modem_cmd = {};
+    modem_cmd.size = 0x0C;                      // Size of the packet (excluding size byte and CRC)
+    memset(modem_cmd.mac_address, 0x00, sizeof(modem_cmd.mac_address)); // MAC address
+    modem_cmd.magic_number = htons(0x0123);     // Converts 0x1234 to big-endian format
 
-    // Initialize the buffer struct
-    struct buffer modem_buf;
-    // Set the length of the buffer
-    modem_buf.len = sizeof(modem_command);
-    // Set the data pointer to the modem command
-    modem_buf.data = modem_command;
+    // Populate payload
+    modem_cmd.control_byte = 0x02;              // Control byte: response needed
+    modem_cmd.cmd_id = 0x04;                    // Command ID for Write
+    modem_cmd.param_id = 0x1D;                  // Output Power - Immediate (Decimal 29)
 
     // Trigger boost command
     if (boost_modem) {
-        log_info("> %s [%d]%s: Enabled", modem_uart->get_type().c_str(), modem_uart->fd, modem_uart->get_name().c_str());
-        // Power value @ Index 12 (30dBm -> 0x1E)
-        modem_buf.data[12] = 0x1E;
-        // Update CRC @ Index 13 & 14
-        modem_buf.data[13] = 0x10;
-        modem_buf.data[14] = 0x1F;
-        // Write the command to the modem
-        modem_uart->write_msg(&modem_buf);
+        modem_cmd.param_value = 0x1E;           // Power value for enabled state
+        modem_cmd.crc1 = 0x10;                  // Hardcoded CRC1
+        modem_cmd.crc2 = 0x1F;                  // Hardcoded CRC2
+        log_info(" > %s [%d]%s: Enable  - %d dBm", modem_diag->get_type().c_str(), modem_diag->fd, modem_diag->get_name().c_str(),modem_cmd.param_value);
     // Disable boost command
     } else {
-        log_info("> %s [%d]%s: Disabled", modem_uart->get_type().c_str(), modem_uart->fd, modem_uart->get_name().c_str());
-        // Power value @ Index 12 (26dBm -> 0x1A)
-        modem_buf.data[12] = 0x1A;
-        // Update CRC @ Index 13 & 14
-        modem_buf.data[13] = 0xD3;
-        modem_buf.data[14] = 0x1E;
-        // Write the command to the modem
-        modem_uart->write_msg(&modem_buf);
+        modem_cmd.param_value = 0x1A;           // Power value for disabled state
+        modem_cmd.crc1 = 0xD3;                  // Hardcoded CRC1
+        modem_cmd.crc2 = 0x1E;                  // Hardcoded CRC2
+        log_info(" > %s [%d]%s: Disable - %d dBm", modem_diag->get_type().c_str(), modem_diag->fd, modem_diag->get_name().c_str(),modem_cmd.param_value);
     }
+
+    // Allocate memory for the buffer and copy the structure into it
+    struct buffer modem_buf;
+    modem_buf.len = sizeof(modem_cmd);
+    modem_buf.data = modem_cmd.data; // Use union's raw data;
+
+    // Send the message
+    modem_diag->write_msg(&modem_buf);
 
     return;
 }
@@ -300,14 +345,12 @@ void Mainloop::intercept_handle_station_ctrl_msg(const struct buffer *buf)
     // Set the port_modem and stbd_modem flags based on the station control flags
     port_modem  = station_ctrl->flags & STATION_CTRL_FLAGS::TX_PORT_MODEM;
     stbd_modem  = station_ctrl->flags & STATION_CTRL_FLAGS::TX_STBD_MODEM;
-    // TODO: Temporary disabling STBD modem (This still alows for Port TX On/Off)
-    //stbd_modem = false; 
     modem_boost = station_ctrl->flags & STATION_CTRL_FLAGS::MODEM_BOOST;
 
-    // Check if the modem boost flag is set and if the modem UART is available
+    // Check if the modem boost flag is set and if the modem endpoint is available
     if(modem_boost != prev_modem_boost) {
-        for (const auto &modem_uart : this->gcs_modems) {
-            handle_modem_boost(buf, modem_boost, modem_uart);
+        for (const auto &modem_diag : this->gcs_modems) {
+            handle_modem_boost(buf, modem_boost, modem_diag);
         }
         // track state of the modem boost.
         prev_modem_boost = modem_boost;
@@ -546,6 +589,7 @@ bool Mainloop::add_endpoints(const Configuration &config)
         log_info("An endpoint with sysid %u on it will sniff all messages",
                  Endpoint::sniffer_sysid);
     }
+    // Create UART endpoints
     for (const auto &conf : config.uart_configs) {
         auto uart = std::make_shared<UartEndpoint>(conf.name);
 
@@ -553,18 +597,11 @@ bool Mainloop::add_endpoints(const Configuration &config)
             return false;
         }
 
-        // Check if the UART is a GCS Modem tagged with "boost"
-        if (conf.name.find("boost") != std::string::npos) {
-            gcs_modems.push_back(uart);
-        }
-        // Proceed as before - Don't add endpoint for our modem UARTs
-        else {
-            g_endpoints.push_back(uart);
-            auto endpoint = g_endpoints.back();
-            this->add_fd(endpoint->fd, endpoint.get(), EPOLLIN);
-        }
+        g_endpoints.push_back(uart);
+        auto endpoint = g_endpoints.back();
+        this->add_fd(endpoint->fd, endpoint.get(), EPOLLIN);
     }
-
+    // Create UDP endpoints
     for (const auto &conf : config.udp_configs) {
         auto udp = std::make_shared<UdpEndpoint>(conf.name);
 
@@ -572,9 +609,16 @@ bool Mainloop::add_endpoints(const Configuration &config)
             return false;
         }
 
-        g_endpoints.emplace_back(udp);
-        auto endpoint = g_endpoints.back();
-        this->add_fd(endpoint->fd, endpoint.get(), EPOLLIN);
+        // Check if the UART is a GCS Modem tagged with "boost"
+        if (conf.name.find("boost") != std::string::npos) {
+            gcs_modems.emplace_back(udp);
+        }
+        // Proceed as before - Don't add endpoint for our modem UARTs
+        else {
+            g_endpoints.emplace_back(udp);
+            auto endpoint = g_endpoints.back();
+            this->add_fd(endpoint->fd, endpoint.get(), EPOLLIN);
+        }
     }
 
     // Create TCP endpoints

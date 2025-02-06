@@ -83,10 +83,11 @@ public:
     int loop();
     void route_msg(struct buffer *buf);
     void intercept_handle_station_ctrl_msg(const struct buffer *buf);
-    void handle_modem_boost(const struct buffer *buf, const bool boost_modem, const std::shared_ptr<UartEndpoint> &modem_uart);
+    void handle_modem_boost(const struct buffer *buf, const bool boost_modem, const std::shared_ptr<UdpEndpoint> &modem_diag);
     void handle_tcp_connection();
     int write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf);
-    int handle_modem_tx(const std::shared_ptr<UartEndpoint> &uartEndpoint, const struct buffer *buf);
+    int handle_modem_tx(const std::shared_ptr<UdpEndpoint> &udpEndpoint, const struct buffer *buf);
+    int convert_gps_to_mavlink1(const std::shared_ptr<UdpEndpoint> &udpEndpoint, const struct buffer *buf);
     void process_tcp_hangups();
     Timeout *add_timeout(uint32_t timeout_msec, std::function<bool(void *)> cb, const void *data);
     void del_timeout(Timeout *t);
@@ -180,5 +181,21 @@ private:
     static Mainloop _instance;
     static bool _initialized;
 
-    std::vector<std::shared_ptr<UartEndpoint>> gcs_modems{};
+    // Structure for Modem Diagnostics Data
+    union MODEM_CMD {
+        struct _packed_ {
+            uint8_t size;                        // Size (excluding this size byte and CRC)
+            uint8_t mac_address[6];              // MAC address
+            uint16_t magic_number;               // Magic number (2 bytes, high byte first)
+            uint8_t control_byte;                // Control byte
+            uint8_t cmd_id;                      // Command ID (first byte of payload)
+            uint8_t param_id;                    // Parameter ID (optional)
+            uint8_t param_value;                 // Parameter Value (optional)
+            uint8_t crc1;                        // CRC (high byte)
+            uint8_t crc2;                        // CRC (low byte)
+        };
+        uint8_t data[15];                        // Raw access to the structure
+    };
+
+    std::vector<std::shared_ptr<UdpEndpoint>> gcs_modems{};
 };
