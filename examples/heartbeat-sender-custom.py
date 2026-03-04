@@ -22,7 +22,7 @@ from pymavlink import mavutil
 from lzc import *
 
 # Define the connection parameters
-device = 'udpout:' + sys.argv[1]
+#device = 'udpout:' + sys.argv[1]
 source_system = 1
 source_component = 1
 
@@ -43,7 +43,8 @@ fault = 0  # Example fault value
 flight_id = b'ABC12345'  # Example flight ID value
 
 # Establish the MAVLink connection
-master = mavutil.mavlink_connection(device, source_system=source_system, source_component=source_component)
+#master = mavutil.mavlink_connection(device, source_system=source_system, source_component=source_component)
+master = mavutil.mavlink_connection('/dev/ttyUSB0', baud=57600)
 
 while True:
     try:
