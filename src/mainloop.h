@@ -124,6 +124,15 @@ public:
     uint8_t lastSeqIdPort = 0;
     uint8_t lastSeqIdStbd = 0;
 
+    // GPS failsafe cache for tracker endpoint
+    mavlink_gps_raw_int_t _gps1_cache{};
+    mavlink_gps_raw_int_t _gps2_cache{};
+    // 0=unset, 1=GPS1, 2=GPS2
+    uint8_t _active_gps_source{0};
+    // GPS validity state flags
+    bool _gps1_valid{false};
+    bool _gps2_valid{false};
+
     /*
      * Return singleton for this class, tied to the main thread. It needds to
      * be called after a call to Mainloop::init().

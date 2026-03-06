@@ -223,42 +223,90 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UdpEndpoint> &udpEndpoint, c
 
 int Mainloop::convert_gps_to_mavlink1(const std::shared_ptr<UdpEndpoint>& udpEndpoint, const struct buffer* buf)
 {
-    int r = 0;
+    // Initialize temp gps placeholder message
+    mavlink_message_t tmp_gps{};
 
-    // Confirm current message is GPS_RAW_INT
-    if (buf->curr.msg_id == MAVLINK_MSG_ID_GPS_RAW_INT) 
-    {
-        // Temporary set to MAVlink1
-        mavlink_set_proto_version(MAVLINK_COMM_0, 1);
-
-        // Temporary buffer to store the outgoing MAVLink message
-        uint8_t data[MAVLINK_CORE_HEADER_LEN + MAVLINK_MSG_ID_GPS_RAW_INT_MIN_LEN] = {};
-        struct buffer buffer = {};
-
-        // Initialize MAV1 message
-        mavlink_message_t mav1_msg = {};
-        // Initialize GPS message for MAV1
-        mavlink_gps_raw_int_t gps_raw_int = {};
-
+    // Update the appropriate GPS cache based on GPS1 or GPS2
+    if (buf->curr.msg_id == MAVLINK_MSG_ID_GPS_RAW_INT) {
         // Copy over payload and msg length
-        memmove(mav1_msg.payload64, buf->curr.payload, buf->curr.payload_len);
-        mav1_msg.len = buf->curr.payload_len;
-        
-        // Decode received MAVLink2 GPS_RAW_INT message
-        mavlink_msg_gps_raw_int_decode(&mav1_msg, &gps_raw_int);
-        // Encode the MAVLink 1 GPS_RAW_INT message
-        mavlink_msg_gps_raw_int_encode(buf->data[5], buf->data[6], &mav1_msg, &gps_raw_int);
-
-        // Serialize the MAVLink 1 message into the send buffer
-        buffer.len = mavlink_msg_to_send_buffer(data, &mav1_msg);
-        buffer.data = data;
-
-        // Write the message to the UDP endpoint
-        r = udpEndpoint->write_msg(&buffer);
-
-        // Set back to MAVlink2
-        mavlink_set_proto_version(MAVLINK_COMM_0, 2);
+        memmove(tmp_gps.payload64, buf->curr.payload, buf->curr.payload_len);
+        tmp_gps.len = buf->curr.payload_len;
+        // Decode GPS_RAW_INT message into GPS_RAW_INT struct for MAV1
+        mavlink_msg_gps_raw_int_decode(&tmp_gps, &_gps1_cache);
+        _gps1_valid = true;
+    } else if (buf->curr.msg_id == MAVLINK_MSG_ID_GPS2_RAW) {
+        // Initialize GPS2 message for MAV1
+        mavlink_gps2_raw_t gps2 = {};
+        // Copy over payload and msg length
+        memmove(tmp_gps.payload64, buf->curr.payload, buf->curr.payload_len);
+        tmp_gps.len = buf->curr.payload_len;
+        // GPS2_RAW has extra fields (dgps_age, dgps_numch) — must decode separately
+        mavlink_msg_gps2_raw_decode(&tmp_gps, &gps2);
+        // Transcribe common fields into GPS_RAW_INT layout
+        _gps2_cache.time_usec          = gps2.time_usec;
+        _gps2_cache.lat                = gps2.lat;
+        _gps2_cache.lon                = gps2.lon;
+        _gps2_cache.alt                = gps2.alt;
+        _gps2_cache.eph                = gps2.eph;
+        _gps2_cache.epv                = gps2.epv;
+        _gps2_cache.vel                = gps2.vel;
+        _gps2_cache.cog                = gps2.cog;
+        _gps2_cache.fix_type           = gps2.fix_type;
+        _gps2_cache.satellites_visible = gps2.satellites_visible;
+        _gps2_cache.alt_ellipsoid      = gps2.alt_ellipsoid;
+        _gps2_cache.h_acc              = gps2.h_acc;
+        _gps2_cache.v_acc              = gps2.v_acc;
+        _gps2_cache.vel_acc            = gps2.vel_acc;
+        _gps2_cache.hdg_acc            = gps2.hdg_acc;
+        _gps2_cache.yaw                = gps2.yaw;
+        _gps2_valid = true;
     }
+
+    // GPS2 wins only on better fix_type, OR on tied fix_type with more satellites; GPS1 takes all remaining ties
+    const mavlink_gps_raw_int_t *best_gps = &_gps1_cache;
+    uint8_t gps_source = 1;
+    if (_gps2_valid && (!_gps1_valid || _gps2_cache.fix_type > _gps1_cache.fix_type ||
+        (_gps2_cache.fix_type == _gps1_cache.fix_type && _gps2_cache.satellites_visible > _gps1_cache.satellites_visible))) {
+        best_gps = &_gps2_cache;
+        gps_source = 2;
+    }
+
+    // GPS_FIX_TYPE: 0=No GPS, 1=No Fix, 2=2D Fix, 3=3D Fix, 4=DGPS, 5=RTK Float, 6=RTK Fixed
+    if (best_gps->fix_type < GPS_FIX_TYPE_2D_FIX) {
+        log_debug(" <> Tracker GPS: no lock (GPS[1] fix=%u sats=%u, GPS[2] fix=%u sats=%u)",
+                _gps1_cache.fix_type, _gps1_cache.satellites_visible,
+                _gps2_cache.fix_type, _gps2_cache.satellites_visible);
+        return 0;
+    }
+
+    // Log once on initial source selection and on every source switch
+    if (gps_source != _active_gps_source) {
+        log_info(" <> Tracker GPS[%u] -> GPS[%u] fix_type=%u, satellites=%u",
+                _active_gps_source, gps_source, best_gps->fix_type, best_gps->satellites_visible);
+        _active_gps_source = gps_source;
+    }
+
+    // Temporary set to MAVlink1
+    mavlink_set_proto_version(MAVLINK_COMM_0, 1);
+
+    // Initialize MAV1 message
+    mavlink_message_t mav1_msg = {};
+    // Buffer to store outgoing MAVLink1 message
+    uint8_t data[MAVLINK_MAX_PACKET_LEN] = {};
+    struct buffer out = {};
+
+    // Encode the MAVLink 1 GPS_RAW_INT message
+    mavlink_msg_gps_raw_int_encode(buf->curr.src_sysid, buf->curr.src_compid, &mav1_msg, best_gps);
+
+    // Serialize the MAVLink 1 message into the send buffer
+    out.len = mavlink_msg_to_send_buffer(data, &mav1_msg);
+    out.data = data;
+
+    // Write the message to the UDP endpoint
+    const int r = udpEndpoint->write_msg(&out);
+
+    // Set back to MAVlink2
+    mavlink_set_proto_version(MAVLINK_COMM_0, 2);
 
     return r;
 }
@@ -274,7 +322,7 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
     // Custom action for GCS Modems
     if (udpEndpoint && (udpEndpoint->get_name() == "port_modem" || udpEndpoint->get_name() == "stbd_modem")) {
         r = handle_modem_tx(udpEndpoint, buf);
-    } else if (udpEndpoint && udpEndpoint->get_name() == "tracker") {
+    } else if (udpEndpoint && udpEndpoint->get_name() == "tracker" && (buf->curr.msg_id == MAVLINK_MSG_ID_GPS_RAW_INT || buf->curr.msg_id == MAVLINK_MSG_ID_GPS2_RAW)) {
         // Intercept GPS_RAW_INT for Tracker Endpoint (Convert MAV2 -> MAV1)
         r = convert_gps_to_mavlink1(udpEndpoint, buf);
     } else {
