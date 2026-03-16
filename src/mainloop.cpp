@@ -273,7 +273,7 @@ int Mainloop::convert_gps_to_mavlink1(const std::shared_ptr<UdpEndpoint>& udpEnd
 
     // GPS_FIX_TYPE: 0=No GPS, 1=No Fix, 2=2D Fix, 3=3D Fix, 4=DGPS, 5=RTK Float, 6=RTK Fixed
     if (best_gps->fix_type < GPS_FIX_TYPE_2D_FIX) {
-        log_debug(" <> Tracker GPS: no lock (GPS[1] fix=%u sats=%u, GPS[2] fix=%u sats=%u)",
+        log_trace(" <> Tracker GPS: no lock (GPS[1] fix=%u sats=%u, GPS[2] fix=%u sats=%u)",
                 _gps1_cache.fix_type, _gps1_cache.satellites_visible,
                 _gps2_cache.fix_type, _gps2_cache.satellites_visible);
         return 0;
@@ -281,7 +281,7 @@ int Mainloop::convert_gps_to_mavlink1(const std::shared_ptr<UdpEndpoint>& udpEnd
 
     // Log once on initial source selection and on every source switch
     if (gps_source != _active_gps_source) {
-        log_info(" <> Tracker GPS[%u] -> GPS[%u] fix_type=%u, satellites=%u",
+        log_trace(" <> Tracker GPS[%u] -> GPS[%u] fix_type=%u, satellites=%u",
                 _active_gps_source, gps_source, best_gps->fix_type, best_gps->satellites_visible);
         _active_gps_source = gps_source;
     }
@@ -385,7 +385,7 @@ void Mainloop::handle_modem_boost(const struct buffer *buf, const bool boost_mod
     return;
 }
 
-void Mainloop::intercept_handle_station_ctrl_msg(const struct buffer *buf) 
+void Mainloop::handle_station_ctrl_msg(const struct buffer *buf)
 {
     // Extract a pointer to mavlink_station_ctrl_t from the payload data in buf
     const mavlink_station_ctrl_t *station_ctrl = (mavlink_station_ctrl_t *)buf->curr.payload;
@@ -419,6 +419,54 @@ void Mainloop::intercept_handle_station_ctrl_msg(const struct buffer *buf)
     return;
 }
 
+void Mainloop::send_station_status_msg(const struct buffer *buf)
+{
+    // Initialize message
+    mavlink_message_t mav_msg = {};
+    mavlink_station_status_t station_status = {};
+
+    // Buffer to store outgoing message
+    uint8_t data[MAVLINK_MAX_PACKET_LEN] = {};
+    struct buffer out = {};
+
+    // Build STATION_STATUS based on current modem states
+    uint8_t status_flags = 0;
+    // Tx Modem Port modem status - GCS
+    if (port_modem) {
+        status_flags |= STATION_STATUS_FLAGS_TX_PORT;
+    }
+    // Tx Modem Stbd modem status - GCS
+    if (stbd_modem) {
+        status_flags |= STATION_STATUS_FLAGS_TX_STBD;
+    }
+    // Tx Modem Boost status - GCS
+    if (modem_boost) {
+        status_flags |= STATION_STATUS_FLAGS_MODEM_BOOST;
+    }
+    // Set the flags
+    station_status.flags = status_flags;
+
+    // Encode the STATION_STATUS message
+    mavlink_msg_station_status_encode(MAV_COMP_ID_AUTOPILOT1, MAV_COMP_ID_ONBOARD_COMPUTER, &mav_msg, &station_status);
+    
+    // Serialize the message
+    out.len = mavlink_msg_to_send_buffer(data, &mav_msg);
+    out.data = data;
+
+    // Populate buffer metadata for routing
+    out.curr.msg_id = MAVLINK_MSG_ID_STATION_STATUS;
+    out.curr.src_sysid = MAV_COMP_ID_AUTOPILOT1;
+    out.curr.src_compid = MAV_COMP_ID_ONBOARD_COMPUTER;
+    out.curr.target_sysid = -1;  // broadcast
+    out.curr.target_compid = -1; // broadcast
+    out.curr.seq_id = buf->curr.seq_id;
+    out.curr.payload_len = mav_msg.len;
+    out.curr.payload = reinterpret_cast<uint8_t*>(_MAV_PAYLOAD_NON_CONST(&mav_msg));
+
+    // Inject the status message back into routing
+    route_msg(&out);
+}
+
 void Mainloop::route_msg(struct buffer *buf)
 {
     bool unknown = true;
@@ -426,7 +474,8 @@ void Mainloop::route_msg(struct buffer *buf)
     // Special case for intercepting and handling GCS Station Modem Control Messages
     if (buf->curr.msg_id == MAVLINK_MSG_ID_STATION_CTRL) {
         // Intercept and handle the station control message
-        intercept_handle_station_ctrl_msg(buf);
+        handle_station_ctrl_msg(buf);
+        send_station_status = true;
     }
 
     for (const auto &e : this->g_endpoints) {
@@ -469,6 +518,13 @@ void Mainloop::route_msg(struct buffer *buf)
                   buf->curr.msg_id,
                   buf->curr.target_sysid,
                   buf->curr.target_compid);
+    }
+
+     // Special case for sending GCS Station Modem Status Messages in response to control messages
+    if (send_station_status) {
+        // Must flip flag first
+        send_station_status = false;
+        send_station_status_msg(buf);
     }
 }
 

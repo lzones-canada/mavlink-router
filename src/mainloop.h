@@ -82,7 +82,8 @@ public:
     int remove_fd(int fd) const;
     int loop();
     void route_msg(struct buffer *buf);
-    void intercept_handle_station_ctrl_msg(const struct buffer *buf);
+    void handle_station_ctrl_msg(const struct buffer *buf);
+    void send_station_status_msg(const struct buffer *buf);
     void handle_modem_boost(const struct buffer *buf, const bool boost_modem, const std::shared_ptr<UdpEndpoint> &modem_diag);
     void handle_tcp_connection();
     int write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf);
@@ -115,6 +116,7 @@ public:
     bool prev_stbd_modem;
     bool modem_boost;
     bool prev_modem_boost;
+    bool send_station_status = false;
 
     ModemState modemState = PORT_TX;  // Initial state of the modems
 
