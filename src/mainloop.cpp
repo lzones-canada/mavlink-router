@@ -271,6 +271,13 @@ int Mainloop::convert_gps_to_mavlink1(const std::shared_ptr<UdpEndpoint>& udpEnd
         gps_source = 2;
     }
 
+    // Only send when GPS message arrived is feeding the selected source.
+    const bool is_fresh = (best_gps == &_gps1_cache && buf->curr.msg_id == MAVLINK_MSG_ID_GPS_RAW_INT)
+                        || (best_gps == &_gps2_cache && buf->curr.msg_id == MAVLINK_MSG_ID_GPS2_RAW);
+    if (!is_fresh) {
+        return 0;
+    }
+
     // GPS_FIX_TYPE: 0=No GPS, 1=No Fix, 2=2D Fix, 3=3D Fix, 4=DGPS, 5=RTK Float, 6=RTK Fixed
     if (best_gps->fix_type < GPS_FIX_TYPE_2D_FIX) {
         log_trace(" <> Tracker GPS: no lock (GPS[1] fix=%u sats=%u, GPS[2] fix=%u sats=%u)",
