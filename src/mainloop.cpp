@@ -799,6 +799,14 @@ bool Mainloop::add_endpoints(const Configuration &config)
         _msg_dedup.set_dedup_period(config.dedup_period_ms);
     }
 
+    // Send initial modem boost state at startup
+    if (modem_boost) {
+        for (const auto &modem_diag : gcs_modems) {
+            handle_modem_boost(nullptr, true, modem_diag);
+        }
+        prev_modem_boost = modem_boost;
+    }
+
     return true;
 }
 

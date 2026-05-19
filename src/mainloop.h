@@ -114,8 +114,8 @@ public:
     bool prev_port_modem;
     bool stbd_modem;
     bool prev_stbd_modem;
-    bool modem_boost;
-    bool prev_modem_boost;
+    bool modem_boost = true;
+    bool prev_modem_boost = false;
     bool send_station_status = false;
 
     ModemState modemState = PORT_TX;  // Initial state of the modems
