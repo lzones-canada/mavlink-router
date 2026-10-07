@@ -123,8 +123,29 @@ version_h = vcs_tag(input : 'src/version.h.in',
                     output: 'git_version.h',
                     command: vcs_tagger)
 
+# MAVLink C headers are generated at setup time from the mavlink submodule
+# (the lzones-canada fork, pinned to the commit ArduPilot uses), so the
+# message table always matches the firmware's dialect. Setup re-runs, and
+# regenerates them, when any of the dialect's message definitions change.
+python3 = find_program('python3')
+mavlink_dir = project_source_root / 'modules/mavlink'
+mavlink_gen = run_command(python3, project_source_root / 'tools/mavlink-gen.py',
+                          mavlink_dir, meson.current_build_dir() / 'mavlink',
+                          check: true)
+foreach xml : mavlink_gen.stdout().strip().split('\n')
+        configure_file(input: mavlink_dir / 'message_definitions/v1.0' / xml,
+                       output: 'mavlink-dep-' + xml,
+                       copy: true)
+endforeach
+
+# The generated headers only exist in the build dir, so add them as a plain
+# include path: include_directories() would also add a non-existent source
+# path and trip -Wmissing-include-dirs.
+add_project_arguments('-I' + meson.current_build_dir() / 'mavlink/ardupilotmega',
+                      language: ['c', 'cpp'])
+
 # Includes
-mavlink_inc = include_directories('modules/mavlink_c_library_v2/ardupilotmega')
+mavlink_inc = include_directories()
 src_inc = include_directories('src')
 
 # Additonal data to be installed

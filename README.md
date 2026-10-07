@@ -18,13 +18,19 @@ In order to compile you need the following packages:
   - GCC or Clang compiler
   - meson >= 0.57 and ninja-build
   - C and C++ standard libraries
+  - python3 (standard library only), to generate the MAVLink headers
 
 ### Fetch dependencies
 
-We currently depend on the mavlink C library. The corresponding submodule
-should be fetched:
+We depend on the MAVLink message definitions in `modules/mavlink`, the
+lzones-canada/mavlink fork pinned to the same commit ArduPilot uses. The C
+headers (ardupilotmega dialect, which includes lzc.xml) are generated from it
+by `meson setup`, and regenerated when the definitions change. Fetch it,
+including its nested pymavlink submodule:
 
     $ git submodule update --init --recursive
+
+When ArduPilot moves its mavlink pin, move `modules/mavlink` to the same commit.
 
 We need some additional packages as build dependencies. Packages for some
 distros:
