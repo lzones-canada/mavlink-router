@@ -129,9 +129,18 @@ version_h = vcs_tag(input : 'src/version.h.in',
 # regenerates them, when any of the dialect's message definitions change.
 python3 = find_program('python3')
 mavlink_dir = project_source_root / 'modules/mavlink'
+fs = import('fs')
+if not (fs.is_file(mavlink_dir / 'message_definitions/v1.0/ardupilotmega.xml') and
+        fs.is_file(mavlink_dir / 'pymavlink/generator/mavgen.py'))
+        error('modules/mavlink (with its pymavlink) is missing or not initialised; ' +
+              'run "git submodule sync --recursive && git submodule update --init --recursive"')
+endif
 mavlink_gen = run_command(python3, project_source_root / 'tools/mavlink-gen.py',
                           mavlink_dir, meson.current_build_dir() / 'mavlink',
-                          check: true)
+                          check: false)
+if mavlink_gen.returncode() != 0
+        error('MAVLink header generation failed:\n' + mavlink_gen.stderr())
+endif
 foreach xml : mavlink_gen.stdout().strip().split('\n')
         configure_file(input: mavlink_dir / 'message_definitions/v1.0' / xml,
                        output: 'mavlink-dep-' + xml,

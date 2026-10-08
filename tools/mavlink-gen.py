@@ -6,6 +6,7 @@
 # usage: mavlink-gen.py <mavlink-dir> <output-dir>
 
 import contextlib
+import io
 import os
 import re
 import sys
@@ -18,9 +19,18 @@ sys.path.insert(0, mavlink_dir)
 from pymavlink.generator import mavgen  # noqa: E402
 
 opts = mavgen.Opts(out_dir, wire_protocol='2.0', language='C', validate=False)
-with contextlib.redirect_stdout(sys.stderr):
-    if not mavgen.mavgen(opts, [os.path.join(defs_dir, dialect)]):
-        sys.exit('mavgen failed')
+# keep mavgen's progress output out of the way unless it fails
+log = io.StringIO()
+try:
+    with contextlib.redirect_stdout(log):
+        ok = mavgen.mavgen(opts, [os.path.join(defs_dir, dialect)])
+except Exception as e:
+    parsing = [line for line in log.getvalue().splitlines() if line.startswith('Parsing ')]
+    where = parsing[-1][len('Parsing '):] if parsing else os.path.join(defs_dir, dialect)
+    sys.exit('mavgen failed on %s: %s: %s' % (where, type(e).__name__, e))
+if not ok:
+    sys.stderr.write(log.getvalue())
+    sys.exit('mavgen failed')
 
 xmls, todo = [], [dialect]
 while todo:
