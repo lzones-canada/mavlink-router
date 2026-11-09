@@ -298,6 +298,15 @@ void Mainloop::set_modem_power(bool boost, bool only_mismatched)
     // Boost always applies to every modem, never just one of them.
     const uint8_t dbm = boost ? ModemDiag::POWER_BOOST_DBM : ModemDiag::POWER_NORMAL_DBM;
 
+    // FIXME:LZC - amplifier test: never write modem power. The modems keep the
+    // power programmed in PicoConfig (28 dBm); diag reads (power, temperature,
+    // firmware, ...) still run. Remove this block to re-enable boost/unboost.
+    if (!gcs_modems.empty()) {
+        log_info(" > Modem power writes disabled: ignoring %s request (%u dBm)",
+                 boost ? "BOOST" : "UNBOOST", dbm);
+        return;
+    }
+
     for (const auto &modem : gcs_modems) {
         if (only_mismatched
             && (modem->power_dbm() == ModemDiag::POWER_UNKNOWN || modem->power_dbm() == dbm)) {
