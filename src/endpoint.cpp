@@ -1057,6 +1057,13 @@ int UartEndpoint::add_speeds(const std::vector<speed_t> &bauds)
 
     set_speed(_baudrates[0]);
 
+    // Nothing to cycle through with a single baudrate. Without this, an endpoint
+    // that never receives MAVLink (e.g. a modem diag port) would re-set its speed,
+    // and flush its buffers, every UART_BAUD_RETRY_SEC forever.
+    if (_baudrates.size() < 2) {
+        return 0;
+    }
+
     _change_baud_timeout = Mainloop::get_instance().add_timeout(
         MSEC_PER_SEC * UART_BAUD_RETRY_SEC,
         std::bind(&UartEndpoint::_change_baud_cb, this, std::placeholders::_1),
