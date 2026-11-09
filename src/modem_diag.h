@@ -52,16 +52,27 @@ std::vector<uint8_t> build_request(uint16_t magic, const std::vector<uint8_t> &p
 
 class ModemDiag : public Pollable {
 public:
-    static constexpr uint8_t POWER_NORMAL_DBM = 26;
-    static constexpr uint8_t POWER_BOOST_DBM = 30;
     static constexpr int POWER_UNKNOWN = -1;
     static constexpr int HW_REVISION_UNKNOWN = -1;
     static constexpr int TEMPERATURE_UNKNOWN = INT_MIN;
 
-    explicit ModemDiag(std::shared_ptr<Endpoint> endpoint);
+    ModemDiag(std::shared_ptr<Endpoint> endpoint, const ModemPowerConfig &power_conf);
     ~ModemDiag() override;
 
     std::string get_name() const { return _endpoint->get_name(); }
+
+    // Display name for logs: the endpoint name up to its first '_', with the
+    // first letter capitalized ("port_boost" -> "Port", "stbd_boost" -> "Stbd").
+    const std::string &label() const { return _label; }
+
+    // Configured powers (main.conf NormalPower / BoostPower / AllowBoost)
+    int normal_power_dbm() const { return _normal_dbm; }
+    int boost_power_dbm() const { return _boost_dbm; }
+    bool allow_boost() const { return _allow_boost; }
+
+    // When power writes are disabled the modem keeps whatever power it was
+    // configured with; a read-back other than NormalPower is only warned about.
+    void set_writes_enabled(bool enabled) { _writes_enabled = enabled; }
 
     // Write the immediate output power (par 29), then read it back to confirm.
     // Retries a few times if the read-back value doesn't match.
@@ -124,6 +135,12 @@ private:
     void _check_target();
 
     std::shared_ptr<Endpoint> _endpoint;
+    std::string _label;
+
+    const int _normal_dbm;
+    const int _boost_dbm;
+    const bool _allow_boost;
+    bool _writes_enabled = true;
 
     std::deque<Request> _requests;
     bool _awaiting = false;      // a request is on the wire, waiting for its reply

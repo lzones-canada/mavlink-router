@@ -73,6 +73,9 @@ const ConfFile::OptionsTable UartEndpoint::option_table[] = {
     {"AllowSrcSysIn",   false, ConfFile::parse_uint8_vector,    OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, allow_src_sys_in)},
     {"BlockSrcSysIn",   false, ConfFile::parse_uint8_vector,    OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, block_src_sys_in)},
     {"group",           false, ConfFile::parse_stdstring,       OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, group)},
+    {"NormalPower",     false, ConfFile::parse_ul,              OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, modem_power.normal_power)},
+    {"BoostPower",      false, ConfFile::parse_ul,              OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, modem_power.boost_power)},
+    {"AllowBoost",      false, ConfFile::parse_bool,            OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, modem_power.allow_boost)},
     {}
 };
 
@@ -95,6 +98,9 @@ const ConfFile::OptionsTable UdpEndpoint::option_table[] = {
     {"AllowSrcSysIn",   false,  ConfFile::parse_uint8_vector,   OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, allow_src_sys_in)},
     {"BlockSrcSysIn",   false,  ConfFile::parse_uint8_vector,   OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, block_src_sys_in)},
     {"group",           false,  ConfFile::parse_stdstring,      OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, group)},
+    {"NormalPower",     false,  ConfFile::parse_ul,             OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, modem_power.normal_power)},
+    {"BoostPower",      false,  ConfFile::parse_ul,             OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, modem_power.boost_power)},
+    {"AllowBoost",      false,  ConfFile::parse_bool,           OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, modem_power.allow_boost)},
     {}
 };
 
@@ -1072,6 +1078,35 @@ int UartEndpoint::add_speeds(const std::vector<speed_t> &bauds)
     return 0;
 }
 
+// NormalPower/BoostPower only matter on modem diag endpoints (named *boost*),
+// but are checked everywhere: an out of range value is a config mistake either way.
+static bool validate_modem_power_config(const char *type, const std::string &name,
+                                        const ModemPowerConfig &conf)
+{
+    for (const auto dbm : {conf.normal_power, conf.boost_power}) {
+        if (dbm < ModemPowerConfig::MIN_DBM || dbm > ModemPowerConfig::MAX_DBM) {
+            log_error("%s %s: modem power %lu dBm out of range (%lu to %lu dBm)",
+                      type,
+                      name.c_str(),
+                      dbm,
+                      ModemPowerConfig::MIN_DBM,
+                      ModemPowerConfig::MAX_DBM);
+            return false;
+        }
+    }
+
+    if (conf.normal_power >= conf.boost_power) {
+        log_error("%s %s: NormalPower (%lu dBm) must be below BoostPower (%lu dBm)",
+                  type,
+                  name.c_str(),
+                  conf.normal_power,
+                  conf.boost_power);
+        return false;
+    }
+
+    return true;
+}
+
 bool UartEndpoint::validate_config(const UartEndpointConfig &config)
 {
     if (config.baudrates.empty()) {
@@ -1084,7 +1119,7 @@ bool UartEndpoint::validate_config(const UartEndpointConfig &config)
         return false;
     }
 
-    return true;
+    return validate_modem_power_config("UartEndpoint", config.name, config.modem_power);
 }
 
 UdpEndpoint::UdpEndpoint(std::string name)
@@ -1459,7 +1494,7 @@ bool UdpEndpoint::validate_config(const UdpEndpointConfig &config)
         return false;
     }
 
-    return true;
+    return validate_modem_power_config("UdpEndpoint", config.name, config.modem_power);
 }
 
 TcpEndpoint::TcpEndpoint(std::string name)

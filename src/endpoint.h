@@ -36,6 +36,19 @@
 #define ENDPOINT_TYPE_TCP  "TCP"
 #define ENDPOINT_TYPE_LOG  "Log"
 
+/*
+ * Output power settings for a modem diagnostics endpoint (one named *boost*).
+ * Ignored on every other endpoint.
+ */
+struct ModemPowerConfig {
+    static constexpr unsigned long MIN_DBM = 20; // P900 output power range
+    static constexpr unsigned long MAX_DBM = 30;
+
+    unsigned long normal_power{26}; ///< conf "NormalPower": operating power, the UNBOOST target
+    unsigned long boost_power{30};  ///< conf "BoostPower": the BOOST target
+    bool allow_boost{true};         ///< conf "AllowBoost": false = never write the modem power
+};
+
 struct UartEndpointConfig {
     std::string name;
     std::string device;
@@ -54,6 +67,7 @@ struct UartEndpointConfig {
     std::vector<uint8_t> allow_src_sys_in;
     std::vector<uint8_t> block_src_sys_in;
     std::string group;
+    ModemPowerConfig modem_power;
 };
 
 struct UdpEndpointConfig {
@@ -76,6 +90,7 @@ struct UdpEndpointConfig {
     std::vector<uint8_t> allow_src_sys_in;
     std::vector<uint8_t> block_src_sys_in;
     std::string group;
+    ModemPowerConfig modem_power;
 };
 
 struct TcpEndpointConfig {

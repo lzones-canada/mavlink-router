@@ -295,25 +295,27 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
 
 void Mainloop::set_modem_power(bool boost, bool only_mismatched)
 {
-    // Boost always applies to every modem, never just one of them.
-    const uint8_t dbm = boost ? ModemDiag::POWER_BOOST_DBM : ModemDiag::POWER_NORMAL_DBM;
-
-    // FIXME:LZC - amplifier test: never write modem power. The modems keep the
-    // power programmed in PicoConfig (28 dBm); diag reads (power, temperature,
-    // firmware, ...) still run. Remove this block to re-enable boost/unboost.
-    if (!gcs_modems.empty()) {
-        log_info(" > Modem power writes disabled: ignoring %s request (%u dBm)",
-                 boost ? "BOOST" : "UNBOOST", dbm);
+    // AllowBoost = false: the modems keep the power they were configured with.
+    // Diag reads (power, temperature, firmware, ...) still run.
+    if (!_modem_power_writes) {
+        // Info only for an actual request; the re-check on every STATION_CTRL is quiet.
+        if (!only_mismatched) {
+            log_info(" > Modem power writes disabled (AllowBoost = false): ignoring %s",
+                     boost ? "BOOST" : "UNBOOST");
+        }
         return;
     }
 
+    // Boost always applies to every modem, never just one of them.
     for (const auto &modem : gcs_modems) {
+        const int dbm = boost ? modem->boost_power_dbm() : modem->normal_power_dbm();
+
         if (only_mismatched
             && (modem->power_dbm() == ModemDiag::POWER_UNKNOWN || modem->power_dbm() == dbm)) {
             continue;
         }
-        log_info(" > Modem %s: %s - %u dBm", modem->get_name().c_str(), boost ? "Enable " : "Disable", dbm);
-        modem->set_power(dbm);
+        log_info(" > Modem %s: %s - %d dBm", modem->label().c_str(), boost ? "Enable " : "Disable", dbm);
+        modem->set_power(static_cast<uint8_t>(dbm));
     }
 }
 
@@ -324,9 +326,9 @@ bool Mainloop::modem_boost_confirmed() const
         return modem_boost;
     }
 
-    // Boosted only when every modem reports the boost power.
+    // Boosted only when every modem reports its boost power.
     for (const auto &modem : gcs_modems) {
-        if (modem->power_dbm() != ModemDiag::POWER_BOOST_DBM) {
+        if (modem->power_dbm() != modem->boost_power_dbm()) {
             return false;
         }
     }
@@ -694,7 +696,7 @@ bool Mainloop::add_endpoints(const Configuration &config)
 
         // Check if the UART is a GCS Modem tagged with "boost"
         if (conf.name.find("boost") != std::string::npos) {
-            _add_modem_diag(uart);
+            _add_modem_diag(uart, conf.modem_power);
         }
         // Proceed as before - Don't add endpoint for our modem UARTs
         else {
@@ -713,7 +715,7 @@ bool Mainloop::add_endpoints(const Configuration &config)
 
         // Check if the UDP is a GCS Modem tagged with "boost"
         if (conf.name.find("boost") != std::string::npos) {
-            _add_modem_diag(udp);
+            _add_modem_diag(udp, conf.modem_power);
         }
         // Proceed as before - Don't add endpoint for our modem UDPs
         else {
@@ -791,6 +793,8 @@ bool Mainloop::add_endpoints(const Configuration &config)
         _msg_dedup.set_dedup_period(config.dedup_period_ms);
     }
 
+    _setup_modem_power();
+
     // Read each modem's current and after-reset output power, so the boost
     // state reported to the GCS starts from what the modems actually report,
     // and its identity (firmware, product, hardware revision). Then keep
@@ -811,11 +815,43 @@ bool Mainloop::add_endpoints(const Configuration &config)
     return true;
 }
 
-void Mainloop::_add_modem_diag(const std::shared_ptr<Endpoint> &endpoint)
+void Mainloop::_setup_modem_power()
+{
+    // Boost applies to all modems or none, so power is only written when every
+    // diag endpoint allows it.
+    size_t allowed = 0;
+    for (const auto &modem : gcs_modems) {
+        if (modem->allow_boost()) {
+            allowed++;
+        }
+    }
+    _modem_power_writes = (allowed == gcs_modems.size());
+
+    if (allowed != 0 && allowed != gcs_modems.size()) {
+        log_warning("AllowBoost differs between modem diag endpoints; "
+                    "boost applies to all modems or none, so power writes are disabled");
+    }
+
+    for (const auto &modem : gcs_modems) {
+        modem->set_writes_enabled(_modem_power_writes);
+        log_info("Modem %s: NormalPower %d dBm, BoostPower %d dBm, AllowBoost %s",
+                 modem->label().c_str(),
+                 modem->normal_power_dbm(),
+                 modem->boost_power_dbm(),
+                 modem->allow_boost() ? "true" : "false");
+    }
+
+    if (!gcs_modems.empty() && !_modem_power_writes) {
+        log_info("Modem power writes disabled: modems keep their configured power");
+    }
+}
+
+void Mainloop::_add_modem_diag(const std::shared_ptr<Endpoint> &endpoint,
+                               const ModemPowerConfig &power_conf)
 {
     // Diag endpoints only carry modem power commands: they are polled for the
     // modem's replies but never routed MAVLink (not added to g_endpoints).
-    auto modem = std::make_shared<ModemDiag>(endpoint);
+    auto modem = std::make_shared<ModemDiag>(endpoint, power_conf);
     modem->on_power_change = [this]() { _on_modem_power_change(); };
 
     add_fd(modem->fd, modem.get(), EPOLLIN);

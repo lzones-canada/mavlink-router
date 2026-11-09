@@ -195,9 +195,15 @@ private:
     static Mainloop _instance;
     static bool _initialized;
 
-    void _add_modem_diag(const std::shared_ptr<Endpoint> &endpoint);
+    void _add_modem_diag(const std::shared_ptr<Endpoint> &endpoint,
+                         const ModemPowerConfig &power_conf);
+    void _setup_modem_power();
     void _on_modem_power_change();
 
     // Modem diagnostics channels (endpoints named *boost*), used for output power
     std::vector<std::shared_ptr<ModemDiag>> gcs_modems{};
+
+    // Whether modem power is ever written: every *boost* endpoint must have
+    // AllowBoost = true, since boost applies to all modems or none.
+    bool _modem_power_writes = true;
 };

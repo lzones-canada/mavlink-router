@@ -193,7 +193,29 @@
 # being send back on the other one right away.
 # Set the same name (arbitrary string) on multiple endpoints to group them.
 # Default: Empty (no group)
-#Group = 
+#Group =
+
+# Modem output power, only used on modem diagnostics endpoints: those with
+# "boost" in their name (UART or UDP). These carry Microhard P900 diag
+# commands, never MAVLink. Boost always applies to every modem or none, so it
+# is only allowed when every *boost* endpoint has AllowBoost = true.
+#
+# Operating power, the target when the GCS selects UNBOOST.
+# Valid values: 20 to 30 (dBm), below BoostPower
+# Default: 26
+#NormalPower =
+#
+# Power used when the GCS selects BOOST.
+# Valid values: 20 to 30 (dBm), above NormalPower
+# Default: 30
+#BoostPower =
+#
+# false: never write the modem power. The modem keeps the power it was
+# configured with (e.g. in PicoConfig) and a read-back other than NormalPower
+# is only logged as a warning. Power and status are still read.
+# Valid values: true, false
+# Default: true
+#AllowBoost =
 
 ## Example
 [UartEndpoint alpha]

@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
 
 #include <common/log.h>
 
@@ -89,9 +90,18 @@ std::vector<uint8_t> build_request(uint16_t magic, const std::vector<uint8_t> &p
 
 } // namespace modem_diag
 
-ModemDiag::ModemDiag(std::shared_ptr<Endpoint> endpoint)
+ModemDiag::ModemDiag(std::shared_ptr<Endpoint> endpoint, const ModemPowerConfig &power_conf)
     : _endpoint(std::move(endpoint))
+    , _normal_dbm(static_cast<int>(power_conf.normal_power))
+    , _boost_dbm(static_cast<int>(power_conf.boost_power))
+    , _allow_boost(power_conf.allow_boost)
 {
+    // "port_boost" -> "Port". A name without a prefix is used as is.
+    const std::string &name = _endpoint->get_name();
+    const size_t underscore = name.find('_');
+    _label = (underscore == 0 || underscore == std::string::npos) ? name : name.substr(0, underscore);
+    _label[0] = static_cast<char>(toupper(static_cast<unsigned char>(_label[0])));
+
     // Share the endpoint's fd for polling. The endpoint owns and closes it.
     fd = _endpoint->fd;
 }
@@ -104,6 +114,10 @@ ModemDiag::~ModemDiag()
 
 void ModemDiag::set_power(uint8_t dbm)
 {
+    if (!_writes_enabled) {
+        return; // Mainloop doesn't call this then, but never write regardless
+    }
+
     // Already writing and confirming this power.
     if (_target_dbm == dbm) {
         return;
@@ -194,10 +208,10 @@ void ModemDiag::_send_next()
 
     const int r = _endpoint->write_msg(&buf);
     if (r < 0) {
-        log_error("Modem %s: diag write failed (%d)", get_name().c_str(), r);
+        log_error("Modem %s: diag write failed (%d)", label().c_str(), r);
     }
     log_trace("Modem %s: sent diag cmd 0x%02x, magic 0x%04x",
-              get_name().c_str(),
+              label().c_str(),
               _current.payload[0],
               _current_magic);
 
@@ -232,7 +246,7 @@ bool ModemDiag::_response_timeout_cb(void *data)
 
     const uint8_t cmd = _current.payload[0];
     log_warning("Modem %s: no reply to diag %s (magic 0x%04x)",
-                get_name().c_str(),
+                label().c_str(),
                 cmd == CMD_WRITE ? "write" : "read",
                 _current_magic);
 
@@ -257,14 +271,14 @@ int ModemDiag::handle_read()
         if (errno == EAGAIN) {
             return 0;
         }
-        log_error("Modem %s: diag read failed (%m)", get_name().c_str());
+        log_error("Modem %s: diag read failed (%m)", label().c_str());
         return -errno;
     }
 
     _rx.insert(_rx.end(), tmp, tmp + r);
     if (_rx.size() > RX_LIMIT) {
         log_warning("Modem %s: discarding %zu bytes of unparsed diag data",
-                    get_name().c_str(),
+                    label().c_str(),
                     _rx.size());
         _rx.clear();
         return r;
@@ -292,7 +306,7 @@ void ModemDiag::_parse_rx()
 
         const uint16_t crc_rx = (_rx[total - 2] << 8) | _rx[total - 1];
         if (modem_diag::crc16(_rx.data(), total - 2) != crc_rx) {
-            log_debug("Modem %s: diag CRC mismatch, resyncing", get_name().c_str());
+            log_debug("Modem %s: diag CRC mismatch, resyncing", label().c_str());
             _rx.erase(_rx.begin());
             continue;
         }
@@ -312,7 +326,7 @@ void ModemDiag::_handle_packet(const uint8_t *pkt, size_t len)
 
     if (!_awaiting || magic != _current_magic || cmd != _current.payload[0]) {
         log_debug("Modem %s: ignoring unexpected diag reply (cmd 0x%02x, magic 0x%04x)",
-                  get_name().c_str(),
+                  label().c_str(),
                   cmd,
                   magic);
         return;
@@ -324,12 +338,12 @@ void ModemDiag::_handle_packet(const uint8_t *pkt, size_t len)
              pkt[1], pkt[2], pkt[3], pkt[4], pkt[5], pkt[6]);
     if (_mac_address != mac) {
         _mac_address = mac;
-        log_info("Modem %s: MAC %s", get_name().c_str(), mac);
+        log_info("Modem %s: MAC %s", label().c_str(), mac);
     }
 
     if (control & CTRL_ACCESS_DENIED) {
         log_error("Modem %s: diag %s denied, modem requires a diag login",
-                  get_name().c_str(),
+                  label().c_str(),
                   cmd == CMD_WRITE ? "write" : "read");
         // Nothing was written or read: the power is not confirmed.
         _read_failed();
@@ -345,18 +359,18 @@ void ModemDiag::_handle_packet(const uint8_t *pkt, size_t len)
 void ModemDiag::_handle_write_reply(uint8_t control, const uint8_t *data, size_t len)
 {
     if (!(control & CTRL_ERROR)) {
-        log_debug("Modem %s: power write accepted", get_name().c_str());
+        log_debug("Modem %s: power write accepted", label().c_str());
         return;
     }
 
     // Error replies list (parameter ID, error code) pairs.
     // 1 = unknown parameter, 2 = out of range, 3 = wrong size.
     if (len < 2) {
-        log_error("Modem %s: power write rejected", get_name().c_str());
+        log_error("Modem %s: power write rejected", label().c_str());
     }
     for (size_t i = 0; i + 1 < len; i += 2) {
         log_error("Modem %s: power write rejected, par %u error %u",
-                  get_name().c_str(),
+                  label().c_str(),
                   data[i],
                   data[i + 1]);
     }
@@ -365,7 +379,7 @@ void ModemDiag::_handle_write_reply(uint8_t control, const uint8_t *data, size_t
 void ModemDiag::_handle_read_reply(uint8_t control, const uint8_t *data, size_t len)
 {
     if (control & CTRL_ERROR) {
-        log_warning("Modem %s: diag read reported an error", get_name().c_str());
+        log_warning("Modem %s: diag read reported an error", label().c_str());
     }
 
     // Reply is a list of parameter IDs, each followed by its value. Parameter
@@ -378,15 +392,15 @@ void ModemDiag::_handle_read_reply(uint8_t control, const uint8_t *data, size_t 
         if (par == PAR_VERSION || par == PAR_PRODUCT) {
             const void *nul = memchr(data + i, '\0', len - i);
             if (nul == nullptr) {
-                log_warning("Modem %s: truncated string par %u in diag reply", get_name().c_str(), par);
+                log_warning("Modem %s: truncated string par %u in diag reply", label().c_str(), par);
                 break;
             }
             const size_t n = static_cast<const uint8_t *>(nul) - (data + i);
             std::string &dst = (par == PAR_VERSION) ? _firmware_version : _product;
             dst.assign(reinterpret_cast<const char *>(data + i), n);
             log_info("Modem %s: %s %s",
-                     get_name().c_str(),
-                     par == PAR_VERSION ? "firmware version" : "product",
+                     label().c_str(),
+                     par == PAR_VERSION ? "Firmware Version" : "Product",
                      dst.c_str());
             i += n + 1;
         } else if (par == PAR_POWER_IMMEDIATE || par == PAR_POWER_AFTER_RESET
@@ -398,22 +412,22 @@ void ModemDiag::_handle_read_reply(uint8_t control, const uint8_t *data, size_t 
             if (par == PAR_POWER_IMMEDIATE) {
                 power = value;
             } else if (par == PAR_POWER_AFTER_RESET) {
-                log_info("Modem %s: output power after reset is %u dBm", get_name().c_str(), value);
+                log_info("Modem %s: Power After Reset %u dBm", label().c_str(), value);
             } else if (par == PAR_TEMPERATURE) {
                 const int temperature = value - TEMPERATURE_OFFSET;
                 // Info only on change, so the periodic read doesn't log every time
                 if (temperature != _temperature_c) {
-                    log_info("Modem %s: temperature is now %d C", get_name().c_str(), temperature);
+                    log_info("Modem %s: Temperature %d C", label().c_str(), temperature);
                 } else {
-                    log_debug("Modem %s: temperature %d C", get_name().c_str(), temperature);
+                    log_debug("Modem %s: Temperature %d C", label().c_str(), temperature);
                 }
                 _temperature_c = temperature;
             } else {
                 _hw_revision = value;
-                log_info("Modem %s: hardware revision %d", get_name().c_str(), _hw_revision);
+                log_info("Modem %s: Hardware Revision %d", label().c_str(), _hw_revision);
             }
         } else {
-            log_warning("Modem %s: unexpected par %u in diag reply", get_name().c_str(), par);
+            log_warning("Modem %s: unexpected par %u in diag reply", label().c_str(), par);
             break; // unknown size, can't parse further
         }
     }
@@ -424,9 +438,9 @@ void ModemDiag::_handle_read_reply(uint8_t control, const uint8_t *data, size_t 
     }
 
     if (power == POWER_UNKNOWN) {
-        log_warning("Modem %s: diag reply did not include output power", get_name().c_str());
+        log_warning("Modem %s: diag reply did not include output power", label().c_str());
     } else {
-        log_debug("Modem %s: output power is %d dBm", get_name().c_str(), power);
+        log_debug("Modem %s: Power Output %d dBm", label().c_str(), power);
     }
 
     _set_power_dbm(power);
@@ -440,7 +454,15 @@ void ModemDiag::_set_power_dbm(int dbm)
     }
 
     if (dbm != POWER_UNKNOWN) {
-        log_info("Modem %s: output power is now %d dBm", get_name().c_str(), dbm);
+        log_info("Modem %s: Power Output %d dBm", label().c_str(), dbm);
+
+        if (!_writes_enabled && dbm != _normal_dbm) {
+            log_warning("Modem %s: output power %d dBm differs from NormalPower %d dBm, "
+                        "not corrected (power writes disabled)",
+                        label().c_str(),
+                        dbm,
+                        _normal_dbm);
+        }
     }
 
     _power_dbm = dbm;
@@ -457,14 +479,14 @@ void ModemDiag::_check_target()
     }
 
     if (_power_dbm == _target_dbm) {
-        log_info("Modem %s: output power %d dBm confirmed", get_name().c_str(), _target_dbm);
+        log_info("Modem %s: Power Output %d dBm confirmed", label().c_str(), _target_dbm);
         _target_dbm = POWER_UNKNOWN;
         return;
     }
 
     if (_attempts >= MAX_POWER_ATTEMPTS) {
         log_error("Modem %s: output power not confirmed at %d dBm after %d attempts",
-                  get_name().c_str(),
+                  label().c_str(),
                   _target_dbm,
                   _attempts);
         _target_dbm = POWER_UNKNOWN;
@@ -473,7 +495,7 @@ void ModemDiag::_check_target()
 
     _attempts++;
     log_warning("Modem %s: output power not confirmed at %d dBm, retrying (%d/%d)",
-                get_name().c_str(),
+                label().c_str(),
                 _target_dbm,
                 _attempts,
                 MAX_POWER_ATTEMPTS);
