@@ -114,7 +114,8 @@ public:
     bool prev_port_modem;
     bool stbd_modem;
     bool prev_stbd_modem;
-    bool modem_boost = true;
+    // Modem boost temporarily disabled (was true) for amplifier use.
+    bool modem_boost = false;
     bool prev_modem_boost = false;
     bool send_station_status = false;
 
