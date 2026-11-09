@@ -174,7 +174,7 @@ public:
 
 private:
     static const unsigned int LOG_AGGREGATE_INTERVAL_SEC = 5;
-    static const unsigned int MODEM_POWER_RECHECK_SEC = 30;
+    static const unsigned int MODEM_POWER_RECHECK_SEC = 10;
 
     std::vector<std::shared_ptr<Endpoint>> g_endpoints{};
     int g_tcp_fd = -1; ///< for TCP server
