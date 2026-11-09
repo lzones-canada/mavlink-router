@@ -81,9 +81,9 @@ public:
     int mod_fd(int fd, void *data, int events) const;
     int remove_fd(int fd) const;
     int loop();
-    void route_msg(struct buffer *buf);
+    void route_msg(struct buffer *buf, Endpoint *src_ep = nullptr);
     void handle_station_ctrl_msg(const struct buffer *buf);
-    void send_station_status_msg(const struct buffer *buf);
+    void send_station_status_msg(const struct buffer *buf, Endpoint *src_ep);
     void handle_modem_boost(const struct buffer *buf, const bool boost_modem, const std::shared_ptr<Endpoint> &modem_diag);
     void handle_tcp_connection();
     int write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf);
@@ -117,7 +117,6 @@ public:
     // Modem boost temporarily disabled (was true) for amplifier use.
     bool modem_boost = false;
     bool prev_modem_boost = false;
-    bool send_station_status = false;
 
     ModemState modemState = PORT_TX;  // Initial state of the modems
 

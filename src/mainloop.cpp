@@ -380,8 +380,19 @@ void Mainloop::handle_station_ctrl_msg(const struct buffer *buf)
     return;
 }
 
-void Mainloop::send_station_status_msg(const struct buffer *buf)
+void Mainloop::send_station_status_msg(const struct buffer *buf, Endpoint *src_ep)
 {
+    // Confirm pointer
+    if (src_ep == nullptr) {
+        log_error("STATION_STATUS: no source endpoint to reply to, dropping");
+        return;
+    }
+
+    // Identity we report STATION_STATUS from (sysid 1, comp 191). Named separately
+    // because the old code passed a component-ID constant as the sysid.
+    constexpr uint8_t STATION_SYSID  = 1;
+    constexpr uint8_t STATION_COMPID = MAV_COMP_ID_ONBOARD_COMPUTER;
+
     // Initialize message
     mavlink_message_t mav_msg = {};
     mavlink_station_status_t station_status = {};
@@ -408,7 +419,7 @@ void Mainloop::send_station_status_msg(const struct buffer *buf)
     station_status.flags = status_flags;
 
     // Encode the STATION_STATUS message
-    mavlink_msg_station_status_encode(MAV_COMP_ID_AUTOPILOT1, MAV_COMP_ID_ONBOARD_COMPUTER, &mav_msg, &station_status);
+    mavlink_msg_station_status_encode(STATION_SYSID, STATION_COMPID, &mav_msg, &station_status);
     
     // Serialize the message
     out.len = mavlink_msg_to_send_buffer(data, &mav_msg);
@@ -416,19 +427,20 @@ void Mainloop::send_station_status_msg(const struct buffer *buf)
 
     // Populate buffer metadata for routing
     out.curr.msg_id = MAVLINK_MSG_ID_STATION_STATUS;
-    out.curr.src_sysid = MAV_COMP_ID_AUTOPILOT1;
-    out.curr.src_compid = MAV_COMP_ID_ONBOARD_COMPUTER;
-    out.curr.target_sysid = -1;  // broadcast
-    out.curr.target_compid = -1; // broadcast
+    out.curr.src_sysid = STATION_SYSID;
+    out.curr.src_compid = STATION_COMPID;
+    out.curr.target_sysid = buf->curr.src_sysid;
+    out.curr.target_compid = buf->curr.src_compid;
     out.curr.seq_id = buf->curr.seq_id;
     out.curr.payload_len = mav_msg.len;
     out.curr.payload = reinterpret_cast<uint8_t*>(_MAV_PAYLOAD_NON_CONST(&mav_msg));
 
-    // Inject the status message back into routing
-    route_msg(&out);
+    // Write directly to the sender's endpoint. Bypasses g_endpoints,
+    // write_msg's name-based dispatch, and handle_modem_tx entirely.
+    src_ep->write_msg(&out);
 }
 
-void Mainloop::route_msg(struct buffer *buf)
+void Mainloop::route_msg(struct buffer *buf, Endpoint *src_ep)
 {
     bool unknown = true;
 
@@ -436,7 +448,8 @@ void Mainloop::route_msg(struct buffer *buf)
     if (buf->curr.msg_id == MAVLINK_MSG_ID_STATION_CTRL) {
         // Intercept and handle the station control message
         handle_station_ctrl_msg(buf);
-        send_station_status = true;
+        send_station_status_msg(buf, src_ep);
+        return;
     }
 
     for (const auto &e : this->g_endpoints) {
@@ -479,13 +492,6 @@ void Mainloop::route_msg(struct buffer *buf)
                   buf->curr.msg_id,
                   buf->curr.target_sysid,
                   buf->curr.target_compid);
-    }
-
-     // Special case for sending GCS Station Modem Status Messages in response to control messages
-    if (send_station_status) {
-        // Must flip flag first
-        send_station_status = false;
-        send_station_status_msg(buf);
     }
 }
 

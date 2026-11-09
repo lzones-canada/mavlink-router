@@ -246,7 +246,7 @@ int Endpoint::handle_read()
             // Only route known mavlink messages..
             if (r == ReadOk) {
                 _add_sys_comp_id(buf.curr.src_sysid, buf.curr.src_compid);
-                Mainloop::get_instance().route_msg(&buf);
+                Mainloop::get_instance().route_msg(&buf, this);
             // Discard anything else..
             } else if (r == ReadUnkownMsg) {
                 if (Log::get_max_level() >= Log::Level::DEBUG) {
