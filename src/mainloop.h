@@ -84,11 +84,11 @@ public:
     void route_msg(struct buffer *buf);
     void handle_station_ctrl_msg(const struct buffer *buf);
     void send_station_status_msg(const struct buffer *buf);
-    void handle_modem_boost(const struct buffer *buf, const bool boost_modem, const std::shared_ptr<UdpEndpoint> &modem_diag);
+    void handle_modem_boost(const struct buffer *buf, const bool boost_modem, const std::shared_ptr<Endpoint> &modem_diag);
     void handle_tcp_connection();
     int write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf);
-    int handle_modem_tx(const std::shared_ptr<UdpEndpoint> &udpEndpoint, const struct buffer *buf);
-    int convert_gps_to_mavlink1(const std::shared_ptr<UdpEndpoint> &udpEndpoint, const struct buffer *buf);
+    int handle_modem_tx(const std::shared_ptr<Endpoint> &endpoint, const struct buffer *buf);
+    int convert_gps_to_mavlink1(const std::shared_ptr<Endpoint> &endpoint, const struct buffer *buf);
     void process_tcp_hangups();
     Timeout *add_timeout(uint32_t timeout_msec, std::function<bool(void *)> cb, const void *data);
     void del_timeout(Timeout *t);
@@ -200,5 +200,5 @@ private:
         uint8_t data[15];                        // Raw access to the structure
     };
 
-    std::vector<std::shared_ptr<UdpEndpoint>> gcs_modems{};
+    std::vector<std::shared_ptr<Endpoint>> gcs_modems{};
 };

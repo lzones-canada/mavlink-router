@@ -141,21 +141,21 @@ int Mainloop::remove_fd(int fd) const
     return 0;
 }
 
-int Mainloop::handle_modem_tx(const std::shared_ptr<UdpEndpoint> &udpEndpoint, const struct buffer *buf)
+int Mainloop::handle_modem_tx(const std::shared_ptr<Endpoint> &endpoint, const struct buffer *buf)
 {
     // reader result.
     int r = 0;
 
     // Determine the current write mode based on our current endpoint.
-    writeToPort = udpEndpoint->get_name() == "port_modem";
-    writeToStbd = udpEndpoint->get_name() == "stbd_modem";
+    writeToPort = endpoint->get_name() == "port_modem";
+    writeToStbd = endpoint->get_name() == "stbd_modem";
 
     // Handle actions based on current state
     switch (modemState) {
         case PORT_TX:
             // Confirm we are on our endpoint for message sending
             if(writeToPort) {
-                r = udpEndpoint->write_msg(buf);
+                r = endpoint->write_msg(buf);
                 log_debug("PORT_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
                 prev_port_modem = true;
                 prev_stbd_modem = false;
@@ -163,7 +163,7 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UdpEndpoint> &udpEndpoint, c
             break;
         case STBD_TX:
             if(writeToStbd) {
-                r = udpEndpoint->write_msg(buf);
+                r = endpoint->write_msg(buf);
                 log_debug("STBD_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
                 prev_port_modem = false;
                 prev_stbd_modem = true;
@@ -173,7 +173,7 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UdpEndpoint> &udpEndpoint, c
         // Transmit the message from both modems
         if (writeToPort && prev_port_modem) {
             if (buf->curr.seq_id != lastSeqIdStbd) {
-                r = udpEndpoint->write_msg(buf);
+                r = endpoint->write_msg(buf);
                 log_debug("PORT_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
                 lastSeqIdPort = buf->curr.seq_id;
                 messageCounter++;
@@ -187,7 +187,7 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UdpEndpoint> &udpEndpoint, c
             }
         } else if (writeToStbd && prev_stbd_modem) {
             if (buf->curr.seq_id != lastSeqIdPort) {
-                r = udpEndpoint->write_msg(buf);
+                r = endpoint->write_msg(buf);
                 log_debug("STBD_TX: msg_id:%u, seq:%u, sysid:%u", buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
                 lastSeqIdStbd = buf->curr.seq_id;
                 messageCounter++;
@@ -205,15 +205,15 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UdpEndpoint> &udpEndpoint, c
             // Transmit a message just once to indicate the modems are turning off
             // and then continue without further transmitting messages
             if (writeToPort && prev_port_modem) {
-                r = udpEndpoint->write_msg(buf);
+                r = endpoint->write_msg(buf);
                 // Update the state to indicate that both modems are off
                 prev_port_modem = false;
-                log_debug("BOTH_OFF[%s]: msg_id:%u, seq:%u, sysid:%u", udpEndpoint->get_name().c_str(),buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
+                log_debug("BOTH_OFF[%s]: msg_id:%u, seq:%u, sysid:%u", endpoint->get_name().c_str(),buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
             } else if (writeToStbd && prev_stbd_modem) {
-                r = udpEndpoint->write_msg(buf);
+                r = endpoint->write_msg(buf);
                 // Update the state to indicate that both modems are off
                 prev_stbd_modem = false;
-                log_debug("BOTH_OFF[%s]: msg_id:%u, seq:%u, sysid:%u", udpEndpoint->get_name().c_str(),buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
+                log_debug("BOTH_OFF[%s]: msg_id:%u, seq:%u, sysid:%u", endpoint->get_name().c_str(),buf->curr.msg_id, buf->curr.seq_id, buf->curr.src_sysid);
             }
             break;
     }
@@ -221,7 +221,7 @@ int Mainloop::handle_modem_tx(const std::shared_ptr<UdpEndpoint> &udpEndpoint, c
     return r;
 }
 
-int Mainloop::convert_gps_to_mavlink1(const std::shared_ptr<UdpEndpoint>& udpEndpoint, const struct buffer* buf)
+int Mainloop::convert_gps_to_mavlink1(const std::shared_ptr<Endpoint>& endpoint, const struct buffer* buf)
 {
     // Decode the incoming GPS_RAW_INT
     mavlink_message_t tmp_gps{};
@@ -254,8 +254,8 @@ int Mainloop::convert_gps_to_mavlink1(const std::shared_ptr<UdpEndpoint>& udpEnd
     out.len = mavlink_msg_to_send_buffer(data, &mav1_msg);
     out.data = data;
 
-    // Write the message to the UDP endpoint
-    const int r = udpEndpoint->write_msg(&out);
+    // Write the message to the tracker endpoint
+    const int r = endpoint->write_msg(&out);
 
     // Set back to MAVlink2
     mavlink_set_proto_version(MAVLINK_COMM_0, 2);
@@ -268,15 +268,15 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
     // reader result.
     int r = 0;
 
-    // Confirm endpoint is UdpEndpoint
-    auto udpEndpoint = std::dynamic_pointer_cast<UdpEndpoint>(e);
+    // Confirm endpoint
+    const auto &name = e->get_name();
 
     // Custom action for GCS Modems
-    if (udpEndpoint && (udpEndpoint->get_name() == "port_modem" || udpEndpoint->get_name() == "stbd_modem")) {
-        r = handle_modem_tx(udpEndpoint, buf);
-    } else if (udpEndpoint && udpEndpoint->get_name() == "tracker" && buf->curr.msg_id == MAVLINK_MSG_ID_GPS_RAW_INT) {
+    if (name == "port_modem" || name == "stbd_modem") {
+        r = handle_modem_tx(e, buf);
+    } else if (name == "tracker" && buf->curr.msg_id == MAVLINK_MSG_ID_GPS_RAW_INT) {
         // Intercept GPS_RAW_INT for Tracker Endpoint (Convert MAV2 -> MAV1)
-        r = convert_gps_to_mavlink1(udpEndpoint, buf);
+        r = convert_gps_to_mavlink1(e, buf);
     } else {
         // Proceed as before.
         r = e->write_msg(buf);
@@ -293,7 +293,7 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
     return r;
 }
 
-void Mainloop::handle_modem_boost(const struct buffer *buf, const bool boost_modem, const std::shared_ptr<UdpEndpoint> &modem_diag)
+void Mainloop::handle_modem_boost(const struct buffer *buf, const bool boost_modem, const std::shared_ptr<Endpoint> &modem_diag)
 {
     // log out if modem UART is not available
     if (modem_diag == nullptr) {
@@ -653,9 +653,16 @@ bool Mainloop::add_endpoints(const Configuration &config)
             return false;
         }
 
-        g_endpoints.push_back(uart);
-        auto endpoint = g_endpoints.back();
-        this->add_fd(endpoint->fd, endpoint.get(), EPOLLIN);
+        // Check if the UART is a GCS Modem tagged with "boost"
+        if (conf.name.find("boost") != std::string::npos) {
+            gcs_modems.emplace_back(uart);
+        }
+        // Proceed as before - Don't add endpoint for our modem UARTs
+        else {
+            g_endpoints.push_back(uart);
+            auto endpoint = g_endpoints.back();
+            this->add_fd(endpoint->fd, endpoint.get(), EPOLLIN);
+        }
     }
     // Create UDP endpoints
     for (const auto &conf : config.udp_configs) {
@@ -665,11 +672,11 @@ bool Mainloop::add_endpoints(const Configuration &config)
             return false;
         }
 
-        // Check if the UART is a GCS Modem tagged with "boost"
+        // Check if the UDP is a GCS Modem tagged with "boost"
         if (conf.name.find("boost") != std::string::npos) {
             gcs_modems.emplace_back(udp);
         }
-        // Proceed as before - Don't add endpoint for our modem UARTs
+        // Proceed as before - Don't add endpoint for our modem UDPs
         else {
             g_endpoints.emplace_back(udp);
             auto endpoint = g_endpoints.back();
