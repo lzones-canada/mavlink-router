@@ -362,8 +362,17 @@ void Mainloop::handle_station_ctrl_msg(const struct buffer *buf)
     } else if (!port_modem && stbd_modem) {
         modemState = STBD_TX;
     } else if (port_modem && stbd_modem) {
+        if (modemState != BOTH_TX) {
+            messageCounter = 0;
+            lastSeqIdPort = 0;
+            lastSeqIdStbd = 0;
+            // BOTH_TX only transmits while one of the prev_* flags is set. Coming
+            // from BOTH_OFF both are cleared, which would stall transmission, so
+            // seed the alternation starting on the port modem.
+            prev_port_modem = true;
+            prev_stbd_modem = false;
+        }
         modemState = BOTH_TX;
-        messageCounter = 0;
     } else {
         modemState = BOTH_OFF;
     }

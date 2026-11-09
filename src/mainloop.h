@@ -111,9 +111,9 @@ public:
      * Variables for modem switching 
      */
     bool port_modem  = true;
-    bool prev_port_modem;
-    bool stbd_modem;
-    bool prev_stbd_modem;
+    bool prev_port_modem = false;
+    bool stbd_modem = false;
+    bool prev_stbd_modem = false;
     // Modem boost temporarily disabled (was true) for amplifier use.
     bool modem_boost = false;
     bool prev_modem_boost = false;
@@ -121,8 +121,8 @@ public:
 
     ModemState modemState = PORT_TX;  // Initial state of the modems
 
-    bool writeToPort;
-    bool writeToStbd;
+    bool writeToPort = false;
+    bool writeToStbd = false;
     int messageCounter = 0;
     uint8_t lastSeqIdPort = 0;
     uint8_t lastSeqIdStbd = 0;
