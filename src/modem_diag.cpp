@@ -458,7 +458,7 @@ void ModemDiag::_set_power_dbm(int dbm)
 
         if (!_writes_enabled && dbm != _normal_dbm) {
             log_warning("Modem %s: output power %d dBm differs from NormalPower %d dBm, "
-                        "not corrected (power writes disabled)",
+                        "not corrected (Power writes Disabled)",
                         label().c_str(),
                         dbm,
                         _normal_dbm);

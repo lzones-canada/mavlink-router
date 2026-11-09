@@ -300,7 +300,7 @@ void Mainloop::set_modem_power(bool boost, bool only_mismatched)
     if (!_modem_power_writes) {
         // Info only for an actual request; the re-check on every STATION_CTRL is quiet.
         if (!only_mismatched) {
-            log_info(" > Modem power writes disabled (AllowBoost = false): ignoring %s",
+            log_info(" > Modem Power Disabled (AllowBoost = false): ignoring %s",
                      boost ? "BOOST" : "UNBOOST");
         }
         return;
@@ -874,7 +874,7 @@ void Mainloop::_setup_modem_power()
     }
 
     if (!gcs_modems.empty() && !_modem_power_writes) {
-        log_info("Modem power writes disabled: modems keep their configured power");
+        log_info("Modem Power Disabled: modems keep their configured power");
     }
 }
 
