@@ -514,10 +514,30 @@ void Mainloop::route_msg(struct buffer *buf, Endpoint *src_ep)
 
     if (unknown) {
         _errors_aggregate.msg_to_unknown++;
-        log_trace("Message %u to unknown sysid/compid: %d/%d",
-                  buf->curr.msg_id,
-                  buf->curr.target_sysid,
-                  buf->curr.target_compid);
+
+        // Per-interval breakdown, dumped by _log_aggregate_timeout (debug only)
+        if (Log::get_max_level() >= Log::Level::DEBUG) {
+            const std::string src_name = src_ep ? src_ep->get_name() : std::string("<null>");
+            _unknown_hist[UnknownKey{src_name, buf->curr.msg_id,
+                                     (int)buf->curr.src_sysid, (int)buf->curr.src_compid,
+                                     (int)buf->curr.target_sysid, (int)buf->curr.target_compid}]++;
+        }
+
+        // Per-message detail, including which endpoints know the source/target (trace only)
+        if (Log::get_max_level() >= Log::Level::TRACE) {
+            log_trace("Message %u seq %u to unknown sysid/compid: %d/%d from %u/%u via %s",
+                      buf->curr.msg_id, (unsigned)buf->curr.seq_id,
+                      buf->curr.target_sysid, buf->curr.target_compid,
+                      buf->curr.src_sysid, buf->curr.src_compid,
+                      src_ep ? src_ep->get_name().c_str() : "<null>");
+
+            for (const auto &e : g_endpoints) {
+                log_trace("\tEndpoint [%d]%s: knows target=%d, knows source=%d",
+                          e->fd, e->get_name().c_str(),
+                          (int)e->has_sys_comp_id(buf->curr.target_sysid, buf->curr.target_compid),
+                          (int)e->has_sys_comp_id(buf->curr.src_sysid, buf->curr.src_compid));
+            }
+        }
     }
 }
 
@@ -651,6 +671,18 @@ bool Mainloop::_log_aggregate_timeout(void *data)
                     LOG_AGGREGATE_INTERVAL_SEC);
         _errors_aggregate.msg_to_unknown = 0;
     }
+
+    // Breakdown of what was unknown this interval, then reset (only filled at debug level)
+    for (const auto &kv : _unknown_hist) {
+        const auto &k = kv.first;
+        log_debug("\tunknown x%u: msg_id=%u from %d/%d via %s -> %d/%d",
+                  kv.second,
+                  std::get<1>(k),
+                  std::get<2>(k), std::get<3>(k),
+                  std::get<0>(k).c_str(),
+                  std::get<4>(k), std::get<5>(k));
+    }
+    _unknown_hist.clear();
 
     for (const auto &e : g_endpoints) {
         e->log_aggregate(LOG_AGGREGATE_INTERVAL_SEC);

@@ -17,8 +17,11 @@
  */
 #pragma once
 
+#include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/log.h"
@@ -30,6 +33,10 @@
 #include "modem_diag.h"
 #include "timeout.h"
 #include "ulog.h"
+
+// Key for the "message to unknown endpoint" histogram:
+// src endpoint name, msg_id, src_sysid, src_compid, target_sysid, target_compid
+using UnknownKey = std::tuple<std::string, uint32_t, int, int, int, int>;
 
 // Station Control Flags for which value is valid.
 struct STATION_CTRL_FLAGS
@@ -180,6 +187,10 @@ private:
     struct {
         uint32_t msg_to_unknown = 0;
     } _errors_aggregate;
+
+    // Histogram of messages no endpoint would take, dumped + cleared every
+    // LOG_AGGREGATE_INTERVAL_SEC. Only populated at debug log level.
+    std::map<UnknownKey, uint32_t> _unknown_hist;
 
     int _retcode;
 
