@@ -305,7 +305,7 @@ void Mainloop::handle_modem_boost(const struct buffer *buf, const bool boost_mod
     MODEM_CMD modem_cmd = {};
     modem_cmd.size = 0x0C;                      // Size of the packet (excluding size byte and CRC)
     memset(modem_cmd.mac_address, 0x00, sizeof(modem_cmd.mac_address)); // MAC address
-    modem_cmd.magic_number = htons(0x0123);     // Converts 0x1234 to big-endian format
+    modem_cmd.magic_number = htons(0x0123);     // Magic number 0x0123 in big-endian (network) order
 
     // Populate payload
     modem_cmd.control_byte = 0x02;              // Control byte: response needed
@@ -326,8 +326,8 @@ void Mainloop::handle_modem_boost(const struct buffer *buf, const bool boost_mod
         log_info(" > %s [%d]%s: Disable - %d dBm", modem_diag->get_type().c_str(), modem_diag->fd, modem_diag->get_name().c_str(),modem_cmd.param_value);
     }
 
-    // Allocate memory for the buffer and copy the structure into it
-    struct buffer modem_buf;
+    // Wrap the raw bytes in a zero-initialised buffer (curr metadata is unused for modem writes)
+    struct buffer modem_buf = {};
     modem_buf.len = sizeof(modem_cmd);
     modem_buf.data = modem_cmd.data; // Use union's raw data;
 
@@ -537,7 +537,7 @@ accept_error:
 
 int Mainloop::loop()
 {
-    const int max_events = 8;
+    const int max_events = 16;
     struct epoll_event events[max_events];
     int r;
 
@@ -717,7 +717,8 @@ bool Mainloop::add_endpoints(const Configuration &config)
         }
 
         for (auto other : g_endpoints) { // find other endpoints in group
-            if (other != e && e->get_group_name() == e->get_group_name()) {
+            // Compare against 'other': the old self-vs-self test was always true
+            if (other != e && e->get_group_name() == other->get_group_name()) {
                 e->link_group_member(other);
             }
         }
