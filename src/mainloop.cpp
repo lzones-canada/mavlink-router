@@ -293,48 +293,52 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
     return r;
 }
 
-void Mainloop::handle_modem_boost(const struct buffer *buf, const bool boost_modem, const std::shared_ptr<Endpoint> &modem_diag)
+void Mainloop::set_modem_power(bool boost, bool only_mismatched)
 {
-    // log out if modem UART is not available
-    if (modem_diag == nullptr) {
-        log_error("MODEM ENDPOINT NOT FOUND");
+    // Boost always applies to every modem, never just one of them.
+    const uint8_t dbm = boost ? ModemDiag::POWER_BOOST_DBM : ModemDiag::POWER_NORMAL_DBM;
+
+    for (const auto &modem : gcs_modems) {
+        if (only_mismatched
+            && (modem->power_dbm() == ModemDiag::POWER_UNKNOWN || modem->power_dbm() == dbm)) {
+            continue;
+        }
+        log_info(" > Modem %s: %s - %u dBm", modem->get_name().c_str(), boost ? "Enable " : "Disable", dbm);
+        modem->set_power(dbm);
+    }
+}
+
+bool Mainloop::modem_boost_confirmed() const
+{
+    // No diag endpoints configured: nothing to confirm against, report what was commanded.
+    if (gcs_modems.empty()) {
+        return modem_boost;
+    }
+
+    // Boosted only when every modem reports the boost power.
+    for (const auto &modem : gcs_modems) {
+        if (modem->power_dbm() != ModemDiag::POWER_BOOST_DBM) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void Mainloop::_on_modem_power_change()
+{
+    if (modem_boost_confirmed() == _reported_modem_boost) {
         return;
     }
 
-    // Create and initialize the MODEM_CMD structure
-    MODEM_CMD modem_cmd = {};
-    modem_cmd.size = 0x0C;                      // Size of the packet (excluding size byte and CRC)
-    memset(modem_cmd.mac_address, 0x00, sizeof(modem_cmd.mac_address)); // MAC address
-    modem_cmd.magic_number = htons(0x0123);     // Magic number 0x0123 in big-endian (network) order
-
-    // Populate payload
-    modem_cmd.control_byte = 0x02;              // Control byte: response needed
-    modem_cmd.cmd_id = 0x04;                    // Command ID for Write
-    modem_cmd.param_id = 0x1D;                  // Output Power - Immediate (Decimal 29)
-
-    // Trigger boost command
-    if (boost_modem) {
-        modem_cmd.param_value = 0x1E;           // Power value for enabled state
-        modem_cmd.crc1 = 0x10;                  // Hardcoded CRC1
-        modem_cmd.crc2 = 0x1F;                  // Hardcoded CRC2
-        log_info(" > %s [%d]%s: Enable  - %d dBm", modem_diag->get_type().c_str(), modem_diag->fd, modem_diag->get_name().c_str(),modem_cmd.param_value);
-    // Disable boost command
-    } else {
-        modem_cmd.param_value = 0x1A;           // Power value for disabled state
-        modem_cmd.crc1 = 0xD3;                  // Hardcoded CRC1
-        modem_cmd.crc2 = 0x1E;                  // Hardcoded CRC2
-        log_info(" > %s [%d]%s: Disable - %d dBm", modem_diag->get_type().c_str(), modem_diag->fd, modem_diag->get_name().c_str(),modem_cmd.param_value);
+    // The confirmed boost state changed since the GCS last heard it. Push an
+    // unsolicited STATION_STATUS to the endpoint that last sent STATION_CTRL,
+    // if it is still connected.
+    for (const auto &e : g_endpoints) {
+        if (e.get() == _station_ctrl_src) {
+            send_station_status_msg(e.get());
+            return;
+        }
     }
-
-    // Wrap the raw bytes in a zero-initialised buffer (curr metadata is unused for modem writes)
-    struct buffer modem_buf = {};
-    modem_buf.len = sizeof(modem_cmd);
-    modem_buf.data = modem_cmd.data; // Use union's raw data;
-
-    // Send the message
-    modem_diag->write_msg(&modem_buf);
-
-    return;
 }
 
 void Mainloop::handle_station_ctrl_msg(const struct buffer *buf)
@@ -347,13 +351,17 @@ void Mainloop::handle_station_ctrl_msg(const struct buffer *buf)
     stbd_modem  = station_ctrl->flags & STATION_CTRL_FLAGS::TX_STBD_MODEM;
     modem_boost = station_ctrl->flags & STATION_CTRL_FLAGS::MODEM_BOOST;
 
-    // Check if the modem boost flag is set and if the modem endpoint is available
+    // Command the modems when the requested boost state changes
     if(modem_boost != prev_modem_boost) {
-        for (const auto &modem_diag : this->gcs_modems) {
-            handle_modem_boost(buf, modem_boost, modem_diag);
-        }
+        set_modem_power(modem_boost);
         // track state of the modem boost.
         prev_modem_boost = modem_boost;
+    } else {
+        // Same request as before, but a modem may report a different power, e.g.
+        // it was configured to start at boost power. Re-command just those modems,
+        // so the operator selecting UNBOOST (or BOOST) always takes effect. Modems
+        // with unknown power (not replying) are left alone to avoid hammering them.
+        set_modem_power(modem_boost, true);
     }
 
     // Update the state machine based on the current state of the modems
@@ -380,10 +388,10 @@ void Mainloop::handle_station_ctrl_msg(const struct buffer *buf)
     return;
 }
 
-void Mainloop::send_station_status_msg(const struct buffer *buf, Endpoint *src_ep)
+void Mainloop::send_station_status_msg(Endpoint *dst)
 {
     // Confirm pointer
-    if (src_ep == nullptr) {
+    if (dst == nullptr) {
         log_error("STATION_STATUS: no source endpoint to reply to, dropping");
         return;
     }
@@ -411,8 +419,10 @@ void Mainloop::send_station_status_msg(const struct buffer *buf, Endpoint *src_e
     if (stbd_modem) {
         status_flags |= STATION_STATUS_FLAGS_TX_STBD;
     }
-    // Tx Modem Boost status - GCS
-    if (modem_boost) {
+    // Tx Modem Boost status - GCS. Set only once every modem has confirmed the
+    // boost power by read-back, not merely because it was commanded.
+    _reported_modem_boost = modem_boost_confirmed();
+    if (_reported_modem_boost) {
         status_flags |= STATION_STATUS_FLAGS_MODEM_BOOST;
     }
     // Set the flags
@@ -429,15 +439,14 @@ void Mainloop::send_station_status_msg(const struct buffer *buf, Endpoint *src_e
     out.curr.msg_id = MAVLINK_MSG_ID_STATION_STATUS;
     out.curr.src_sysid = STATION_SYSID;
     out.curr.src_compid = STATION_COMPID;
-    out.curr.target_sysid = buf->curr.src_sysid;
-    out.curr.target_compid = buf->curr.src_compid;
-    out.curr.seq_id = buf->curr.seq_id;
+    out.curr.target_sysid = _station_ctrl_sysid;
+    out.curr.target_compid = _station_ctrl_compid;
     out.curr.payload_len = mav_msg.len;
     out.curr.payload = reinterpret_cast<uint8_t*>(_MAV_PAYLOAD_NON_CONST(&mav_msg));
 
-    // Write directly to the sender's endpoint. Bypasses g_endpoints,
+    // Write directly to the GCS endpoint. Bypasses g_endpoints,
     // write_msg's name-based dispatch, and handle_modem_tx entirely.
-    src_ep->write_msg(&out);
+    dst->write_msg(&out);
 }
 
 void Mainloop::route_msg(struct buffer *buf, Endpoint *src_ep)
@@ -446,9 +455,15 @@ void Mainloop::route_msg(struct buffer *buf, Endpoint *src_ep)
 
     // Special case for intercepting and handling GCS Station Modem Control Messages
     if (buf->curr.msg_id == MAVLINK_MSG_ID_STATION_CTRL) {
+        // Remember who to send STATION_STATUS to, including unsolicited
+        // updates once the modems confirm a power change.
+        _station_ctrl_src = src_ep;
+        _station_ctrl_sysid = buf->curr.src_sysid;
+        _station_ctrl_compid = buf->curr.src_compid;
+
         // Intercept and handle the station control message
         handle_station_ctrl_msg(buf);
-        send_station_status_msg(buf, src_ep);
+        send_station_status_msg(src_ep);
         return;
     }
 
@@ -670,7 +685,7 @@ bool Mainloop::add_endpoints(const Configuration &config)
 
         // Check if the UART is a GCS Modem tagged with "boost"
         if (conf.name.find("boost") != std::string::npos) {
-            gcs_modems.emplace_back(uart);
+            _add_modem_diag(uart);
         }
         // Proceed as before - Don't add endpoint for our modem UARTs
         else {
@@ -689,7 +704,7 @@ bool Mainloop::add_endpoints(const Configuration &config)
 
         // Check if the UDP is a GCS Modem tagged with "boost"
         if (conf.name.find("boost") != std::string::npos) {
-            gcs_modems.emplace_back(udp);
+            _add_modem_diag(udp);
         }
         // Proceed as before - Don't add endpoint for our modem UDPs
         else {
@@ -767,15 +782,35 @@ bool Mainloop::add_endpoints(const Configuration &config)
         _msg_dedup.set_dedup_period(config.dedup_period_ms);
     }
 
+    // Read each modem's current and after-reset output power, so the boost
+    // state reported to the GCS starts from what the modems actually report,
+    // and its identity (firmware, product, hardware revision). Then keep
+    // re-reading the power and temperature so a modem that resets (falling back
+    // to its after-reset power) is noticed.
+    for (const auto &modem : gcs_modems) {
+        modem->read_power();
+        modem->read_info();
+        modem->start_periodic_read(MODEM_POWER_RECHECK_SEC * MSEC_PER_SEC);
+    }
+
     // Send initial modem boost state at startup
     if (modem_boost) {
-        for (const auto &modem_diag : gcs_modems) {
-            handle_modem_boost(nullptr, true, modem_diag);
-        }
+        set_modem_power(true);
         prev_modem_boost = modem_boost;
     }
 
     return true;
+}
+
+void Mainloop::_add_modem_diag(const std::shared_ptr<Endpoint> &endpoint)
+{
+    // Diag endpoints only carry modem power commands: they are polled for the
+    // modem's replies but never routed MAVLink (not added to g_endpoints).
+    auto modem = std::make_shared<ModemDiag>(endpoint);
+    modem->on_power_change = [this]() { _on_modem_power_change(); };
+
+    add_fd(modem->fd, modem.get(), EPOLLIN);
+    gcs_modems.emplace_back(modem);
 }
 
 void Mainloop::clear_endpoints()

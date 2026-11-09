@@ -27,6 +27,7 @@
 #include "comm.h"
 #include "dedup.h"
 #include "endpoint.h"
+#include "modem_diag.h"
 #include "timeout.h"
 #include "ulog.h"
 
@@ -83,8 +84,11 @@ public:
     int loop();
     void route_msg(struct buffer *buf, Endpoint *src_ep = nullptr);
     void handle_station_ctrl_msg(const struct buffer *buf);
-    void send_station_status_msg(const struct buffer *buf, Endpoint *src_ep);
-    void handle_modem_boost(const struct buffer *buf, const bool boost_modem, const std::shared_ptr<Endpoint> &modem_diag);
+    void send_station_status_msg(Endpoint *dst);
+    // Command every boost modem to the normal or boost power. With
+    // @only_mismatched, only modems known to be at a different power.
+    void set_modem_power(bool boost, bool only_mismatched = false);
+    bool modem_boost_confirmed() const;
     void handle_tcp_connection();
     int write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf);
     int handle_modem_tx(const std::shared_ptr<Endpoint> &endpoint, const struct buffer *buf);
@@ -117,6 +121,13 @@ public:
     // Modem boost temporarily disabled (was true) for amplifier use.
     bool modem_boost = false;
     bool prev_modem_boost = false;
+    // Boost state last sent to the GCS in STATION_STATUS (confirmed by read-back)
+    bool _reported_modem_boost = false;
+
+    // Sender of the last STATION_CTRL, where STATION_STATUS is sent
+    Endpoint *_station_ctrl_src = nullptr;
+    uint8_t _station_ctrl_sysid = 0;
+    uint8_t _station_ctrl_compid = 0;
 
     ModemState modemState = PORT_TX;  // Initial state of the modems
 
@@ -156,6 +167,7 @@ public:
 
 private:
     static const unsigned int LOG_AGGREGATE_INTERVAL_SEC = 5;
+    static const unsigned int MODEM_POWER_RECHECK_SEC = 30;
 
     std::vector<std::shared_ptr<Endpoint>> g_endpoints{};
     int g_tcp_fd = -1; ///< for TCP server
@@ -183,21 +195,9 @@ private:
     static Mainloop _instance;
     static bool _initialized;
 
-    // Structure for Modem Diagnostics Data
-    union MODEM_CMD {
-        struct _packed_ {
-            uint8_t size;                        // Size (excluding this size byte and CRC)
-            uint8_t mac_address[6];              // MAC address
-            uint16_t magic_number;               // Magic number (2 bytes, high byte first)
-            uint8_t control_byte;                // Control byte
-            uint8_t cmd_id;                      // Command ID (first byte of payload)
-            uint8_t param_id;                    // Parameter ID (optional)
-            uint8_t param_value;                 // Parameter Value (optional)
-            uint8_t crc1;                        // CRC (high byte)
-            uint8_t crc2;                        // CRC (low byte)
-        };
-        uint8_t data[15];                        // Raw access to the structure
-    };
+    void _add_modem_diag(const std::shared_ptr<Endpoint> &endpoint);
+    void _on_modem_power_change();
 
-    std::vector<std::shared_ptr<Endpoint>> gcs_modems{};
+    // Modem diagnostics channels (endpoints named *boost*), used for output power
+    std::vector<std::shared_ptr<ModemDiag>> gcs_modems{};
 };
