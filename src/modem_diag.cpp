@@ -17,6 +17,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -88,6 +89,35 @@ std::vector<uint8_t> build_request(uint16_t magic, const std::vector<uint8_t> &p
     return pkt;
 }
 
+bool parse_firmware_version(const std::string &version, FirmwareNumbers *out)
+{
+    *out = FirmwareNumbers{};
+
+    unsigned long n[4];
+    size_t found = 0;
+    const char *p = version.c_str();
+    while (*p != '\0' && found < 4) {
+        if (!isdigit(static_cast<unsigned char>(*p))) {
+            p++;
+            continue;
+        }
+        char *end;
+        n[found++] = strtoul(p, &end, 10);
+        p = end;
+    }
+
+    if (found < 4 || n[0] > UINT8_MAX || n[1] > UINT8_MAX || n[2] > UINT8_MAX
+        || n[3] > UINT16_MAX) {
+        return false;
+    }
+
+    out->major = static_cast<uint8_t>(n[0]);
+    out->minor = static_cast<uint8_t>(n[1]);
+    out->build_major = static_cast<uint8_t>(n[2]);
+    out->build_minor = static_cast<uint16_t>(n[3]);
+    return true;
+}
+
 } // namespace modem_diag
 
 ModemDiag::ModemDiag(std::shared_ptr<Endpoint> endpoint, const ModemPowerConfig &power_conf)
@@ -149,12 +179,35 @@ void ModemDiag::read_info()
     _queue({CMD_READ, PAR_HW_REVISION}, false);
 }
 
-void ModemDiag::start_periodic_read(uint32_t interval_ms)
+void ModemDiag::start_periodic_read(uint32_t interval_ms, uint32_t offset_ms)
 {
+    _poll_interval_ms = interval_ms;
+
+    if (offset_ms == 0) {
+        _periodic_start_cb(nullptr);
+        return;
+    }
+
+    // Timeouts repeat at their first delay, so wait out the offset with a
+    // one-shot timeout before starting the periodic one.
     Mainloop::get_instance().add_timeout(
-        interval_ms,
+        offset_ms,
+        std::bind(&ModemDiag::_periodic_start_cb, this, std::placeholders::_1),
+        this);
+}
+
+bool ModemDiag::_periodic_start_cb(void *data)
+{
+    // Called from the offset timeout (data set): read now, then every interval.
+    if (data != nullptr) {
+        _periodic_read_cb(data);
+    }
+
+    Mainloop::get_instance().add_timeout(
+        _poll_interval_ms,
         std::bind(&ModemDiag::_periodic_read_cb, this, std::placeholders::_1),
         this);
+    return false; // one-shot
 }
 
 bool ModemDiag::_periodic_read_cb(void *data)
@@ -229,6 +282,11 @@ void ModemDiag::_complete_request()
     if (_response_timeout != nullptr) {
         Mainloop::get_instance().del_timeout(_response_timeout);
         _response_timeout = nullptr;
+    }
+
+    // A read refreshed (or invalidated) the power, temperature or identity.
+    if (_current.payload[0] == CMD_READ && on_update) {
+        on_update();
     }
 
     // Respect the minimum gap between requests before sending the next one.
@@ -402,6 +460,13 @@ void ModemDiag::_handle_read_reply(uint8_t control, const uint8_t *data, size_t 
                      label().c_str(),
                      par == PAR_VERSION ? "Firmware Version" : "Product",
                      dst.c_str());
+            if (par == PAR_VERSION
+                && !modem_diag::parse_firmware_version(_firmware_version, &_firmware_numbers)) {
+                log_warning("Modem %s: Firmware Version '%s' not in the expected "
+                            "\"vX.YY build A.B\" form, sent to the GCS as unknown",
+                            label().c_str(),
+                            _firmware_version.c_str());
+            }
             i += n + 1;
         } else if (par == PAR_POWER_IMMEDIATE || par == PAR_POWER_AFTER_RESET
                    || par == PAR_TEMPERATURE || par == PAR_HW_REVISION) {
@@ -466,9 +531,6 @@ void ModemDiag::_set_power_dbm(int dbm)
     }
 
     _power_dbm = dbm;
-    if (on_power_change) {
-        on_power_change();
-    }
 }
 
 void ModemDiag::_check_target()

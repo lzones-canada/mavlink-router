@@ -67,6 +67,7 @@ struct UartEndpointConfig {
     std::vector<uint8_t> allow_src_sys_in;
     std::vector<uint8_t> block_src_sys_in;
     std::string group;
+    bool station_status{false}; ///< conf "StationStatus": send STATION_STATUS to this endpoint
     ModemPowerConfig modem_power;
 };
 
@@ -90,6 +91,7 @@ struct UdpEndpointConfig {
     std::vector<uint8_t> allow_src_sys_in;
     std::vector<uint8_t> block_src_sys_in;
     std::string group;
+    bool station_status{false}; ///< conf "StationStatus": send STATION_STATUS to this endpoint
     ModemPowerConfig modem_power;
 };
 
@@ -111,6 +113,7 @@ struct TcpEndpointConfig {
     std::vector<uint8_t> allow_src_sys_in;
     std::vector<uint8_t> block_src_sys_in;
     std::string group;
+    bool station_status{false}; ///< conf "StationStatus": send STATION_STATUS to this endpoint
 };
 
 /*

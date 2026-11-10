@@ -128,10 +128,8 @@ public:
     // Modem boost temporarily disabled (was true) for amplifier use.
     bool modem_boost = false;
     bool prev_modem_boost = false;
-    // Boost state last sent to the GCS in STATION_STATUS (confirmed by read-back)
-    bool _reported_modem_boost = false;
-
-    // Sender of the last STATION_CTRL, where STATION_STATUS is sent
+    // Sender of the last STATION_CTRL. Gets the STATION_STATUS updates when no
+    // endpoint is configured with StationStatus = true.
     Endpoint *_station_ctrl_src = nullptr;
     uint8_t _station_ctrl_sysid = 0;
     uint8_t _station_ctrl_compid = 0;
@@ -209,10 +207,15 @@ private:
     void _add_modem_diag(const std::shared_ptr<Endpoint> &endpoint,
                          const ModemPowerConfig &power_conf);
     void _setup_modem_power();
-    void _on_modem_power_change();
+    void _send_station_status_update();
+    const ModemDiag *_find_modem(const char *prefix) const;
 
     // Modem diagnostics channels (endpoints named *boost*), used for output power
     std::vector<std::shared_ptr<ModemDiag>> gcs_modems{};
+
+    // Endpoints configured with StationStatus = true: they get every
+    // STATION_STATUS update, from startup, without sending STATION_CTRL first.
+    std::vector<std::shared_ptr<Endpoint>> _station_status_endpoints{};
 
     // Whether modem power is ever written: every *boost* endpoint must have
     // AllowBoost = true, since boost applies to all modems or none.

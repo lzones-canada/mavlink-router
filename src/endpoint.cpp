@@ -73,6 +73,7 @@ const ConfFile::OptionsTable UartEndpoint::option_table[] = {
     {"AllowSrcSysIn",   false, ConfFile::parse_uint8_vector,    OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, allow_src_sys_in)},
     {"BlockSrcSysIn",   false, ConfFile::parse_uint8_vector,    OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, block_src_sys_in)},
     {"group",           false, ConfFile::parse_stdstring,       OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, group)},
+    {"StationStatus",   false, ConfFile::parse_bool,            OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, station_status)},
     {"NormalPower",     false, ConfFile::parse_ul,              OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, modem_power.normal_power)},
     {"BoostPower",      false, ConfFile::parse_ul,              OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, modem_power.boost_power)},
     {"AllowBoost",      false, ConfFile::parse_bool,            OPTIONS_TABLE_STRUCT_FIELD(UartEndpointConfig, modem_power.allow_boost)},
@@ -98,6 +99,7 @@ const ConfFile::OptionsTable UdpEndpoint::option_table[] = {
     {"AllowSrcSysIn",   false,  ConfFile::parse_uint8_vector,   OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, allow_src_sys_in)},
     {"BlockSrcSysIn",   false,  ConfFile::parse_uint8_vector,   OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, block_src_sys_in)},
     {"group",           false,  ConfFile::parse_stdstring,      OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, group)},
+    {"StationStatus",   false,  ConfFile::parse_bool,           OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, station_status)},
     {"NormalPower",     false,  ConfFile::parse_ul,             OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, modem_power.normal_power)},
     {"BoostPower",      false,  ConfFile::parse_ul,             OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, modem_power.boost_power)},
     {"AllowBoost",      false,  ConfFile::parse_bool,           OPTIONS_TABLE_STRUCT_FIELD(UdpEndpointConfig, modem_power.allow_boost)},
@@ -122,6 +124,7 @@ const ConfFile::OptionsTable TcpEndpoint::option_table[] = {
     {"AllowSrcSysIn",   false,  ConfFile::parse_uint8_vector,   OPTIONS_TABLE_STRUCT_FIELD(TcpEndpointConfig, allow_src_sys_in)},
     {"BlockSrcSysIn",   false,  ConfFile::parse_uint8_vector,   OPTIONS_TABLE_STRUCT_FIELD(TcpEndpointConfig, block_src_sys_in)},
     {"group",           false,  ConfFile::parse_stdstring,      OPTIONS_TABLE_STRUCT_FIELD(TcpEndpointConfig, group)},
+    {"StationStatus",   false,  ConfFile::parse_bool,           OPTIONS_TABLE_STRUCT_FIELD(TcpEndpointConfig, station_status)},
     {}
 };
 // clang-format on

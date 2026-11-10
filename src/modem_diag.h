@@ -48,6 +48,19 @@ uint16_t crc16(const uint8_t *data, size_t len);
 // set. @payload is the command ID followed by its data.
 std::vector<uint8_t> build_request(uint16_t magic, const std::vector<uint8_t> &payload);
 
+// Firmware version as numbers, for sending without the string:
+// "v1.50 build 1.3870" -> major 1, minor 50, build_major 1, build_minor 3870.
+struct FirmwareNumbers {
+    uint8_t major{0};
+    uint8_t minor{0};
+    uint8_t build_major{0};
+    uint16_t build_minor{0};
+};
+
+// Parse the first four numbers of a firmware version string. Returns false,
+// leaving @out all zero, if there are fewer than four or one is out of range.
+bool parse_firmware_version(const std::string &version, FirmwareNumbers *out);
+
 } // namespace modem_diag
 
 class ModemDiag : public Pollable {
@@ -87,15 +100,19 @@ public:
     void read_info();
 
     // Re-read the output power and temperature every @interval_ms, so a modem
-    // that resets (and falls back to its after-reset power) is noticed.
-    void start_periodic_read(uint32_t interval_ms);
+    // that resets (and falls back to its after-reset power) is noticed. With
+    // @offset_ms, the first read is after @offset_ms and then every
+    // @interval_ms, so several modems are polled staggered instead of at once.
+    void start_periodic_read(uint32_t interval_ms, uint32_t offset_ms = 0);
 
     // Output power last reported by the modem, POWER_UNKNOWN until confirmed
     // or after a failed read.
     int power_dbm() const { return _power_dbm; }
 
     // Identity as reported by the modem; strings are empty until known.
-    const std::string &firmware_version() const { return _firmware_version; } // e.g. "v1.09"
+    const std::string &firmware_version() const { return _firmware_version; } // e.g. "v1.50 build 1.3870"
+    // The firmware version as numbers, all zero until known or if unparsable.
+    const modem_diag::FirmwareNumbers &firmware_numbers() const { return _firmware_numbers; }
     const std::string &product() const { return _product; }
     const std::string &mac_address() const { return _mac_address; } // "12:34:56:78:AB:CD"
     int hardware_revision() const { return _hw_revision; }          // HW_REVISION_UNKNOWN until read
@@ -104,8 +121,9 @@ public:
     // Refreshed with each periodic read.
     int temperature_c() const { return _temperature_c; }
 
-    // Called whenever power_dbm() changes.
-    std::function<void()> on_power_change;
+    // Called after every diag read completes (replied, denied or timed out),
+    // so the power, temperature or identity may have been refreshed.
+    std::function<void()> on_update;
 
     int handle_read() override;
     bool handle_canwrite() override { return false; }
@@ -123,6 +141,7 @@ private:
     bool _response_timeout_cb(void *data);
     bool _gap_timeout_cb(void *data);
     bool _periodic_read_cb(void *data);
+    bool _periodic_start_cb(void *data);
     bool _current_reads(uint8_t par) const;
     void _read_failed();
 
@@ -149,6 +168,7 @@ private:
     uint16_t _next_magic = 0x0123;
     Timeout *_response_timeout = nullptr;
     Timeout *_gap_timeout = nullptr;
+    uint32_t _poll_interval_ms = 0;
 
     std::vector<uint8_t> _rx;
 
@@ -157,6 +177,7 @@ private:
     int _attempts = 0;
 
     std::string _firmware_version;
+    modem_diag::FirmwareNumbers _firmware_numbers{};
     std::string _product;
     std::string _mac_address;
     int _hw_revision = HW_REVISION_UNKNOWN;

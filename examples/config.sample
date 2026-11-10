@@ -195,6 +195,17 @@
 # Default: Empty (no group)
 #Group =
 
+# Send STATION_STATUS (station state and the modem power, temperature and
+# firmware read back from the *boost* endpoints) to this endpoint: as the reply
+# to every STATION_CTRL, after every modem poll and when the boost state
+# changes. Use on the GCS endpoint. With `Mode = Normal` UDP, updates are sent
+# from startup, before the GCS sends anything.
+# When no endpoint sets this, updates go to whichever endpoint last sent
+# STATION_CTRL. Also valid on UDP and TCP endpoints; ignored on *boost* ones.
+# Valid values: true, false
+# Default: false
+#StationStatus =
+
 # Modem output power, only used on modem diagnostics endpoints: those with
 # "boost" in their name (UART or UDP). These carry Microhard P900 diag
 # commands, never MAVLink. Boost always applies to every modem or none, so it
