@@ -303,10 +303,24 @@ bool ModemDiag::_response_timeout_cb(void *data)
     _response_timeout = nullptr; // removed by returning false
 
     const uint8_t cmd = _current.payload[0];
-    log_warning("Modem %s: no reply to diag %s (magic 0x%04x)",
-                label().c_str(),
-                cmd == CMD_WRITE ? "write" : "read",
-                _current_magic);
+    _no_reply_count++;
+    if (_no_reply_count < NO_REPLY_WARN_LIMIT) {
+        log_warning("Modem %s: no reply to diag %s (magic 0x%04x)",
+                    label().c_str(),
+                    cmd == CMD_WRITE ? "write" : "read",
+                    _current_magic);
+    } else if (_no_reply_count == NO_REPLY_WARN_LIMIT) {
+        // Keep polling so it is picked up again, but stop filling the log
+        // (no modem attached, e.g. SITL, or modem unplugged/powered off).
+        log_warning("Modem %s: not responding to diag requests, still polling; "
+                    "further no-reply warnings suppressed until it answers",
+                    label().c_str());
+    } else {
+        log_debug("Modem %s: no reply to diag %s (magic 0x%04x)",
+                  label().c_str(),
+                  cmd == CMD_WRITE ? "write" : "read",
+                  _current_magic);
+    }
 
     _read_failed();
     _complete_request();
@@ -388,6 +402,16 @@ void ModemDiag::_handle_packet(const uint8_t *pkt, size_t len)
                   cmd,
                   magic);
         return;
+    }
+
+    const bool recovered = _no_reply_count >= NO_REPLY_WARN_LIMIT;
+    _no_reply_count = 0;
+    if (recovered) {
+        // Redo the startup reads it missed (identity, after-reset power), which
+        // also covers a different modem having been connected meanwhile.
+        log_info("Modem %s: responding again", label().c_str());
+        read_power();
+        read_info();
     }
 
     // Replies always carry the modem's real MAC, even to local (MAC 0) requests.

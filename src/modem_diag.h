@@ -170,6 +170,12 @@ private:
     Timeout *_gap_timeout = nullptr;
     uint32_t _poll_interval_ms = 0;
 
+    // Consecutive requests without a reply. After NO_REPLY_WARN_LIMIT the
+    // modem is reported as not responding once and further misses are only
+    // logged at debug level (e.g. SITL or bench runs without a modem attached).
+    static constexpr int NO_REPLY_WARN_LIMIT = 3;
+    int _no_reply_count = 0;
+
     std::vector<uint8_t> _rx;
 
     int _power_dbm = POWER_UNKNOWN;
