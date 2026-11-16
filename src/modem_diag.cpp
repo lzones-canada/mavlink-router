@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 
 #include <common/log.h>
 
@@ -55,6 +56,10 @@ static constexpr int TEMPERATURE_OFFSET = 55;
 static constexpr uint32_t RESPONSE_TIMEOUT_MS = 500;
 static constexpr uint32_t REQUEST_GAP_MS = 25; // protocol requires >= 20 ms between requests
 static constexpr int MAX_POWER_ATTEMPTS = 3;
+
+// A modem that has never answered gets this long after startup before no-reply
+// warnings are printed (it may still be booting). Polling is unaffected.
+static constexpr std::chrono::seconds NO_REPLY_GRACE{30};
 
 namespace modem_diag {
 
@@ -142,7 +147,7 @@ ModemDiag::~ModemDiag()
     fd = -1;
 }
 
-void ModemDiag::set_power(uint8_t dbm)
+void ModemDiag::set_power(uint8_t dbm, bool boost)
 {
     if (!_writes_enabled) {
         return; // Mainloop doesn't call this then, but never write regardless
@@ -160,6 +165,7 @@ void ModemDiag::set_power(uint8_t dbm)
                     _requests.end());
 
     _target_dbm = dbm;
+    _target_boost = boost;
     _attempts = 1;
 
     _queue({CMD_WRITE, PAR_POWER_IMMEDIATE, dbm}, true);
@@ -303,6 +309,20 @@ bool ModemDiag::_response_timeout_cb(void *data)
     _response_timeout = nullptr; // removed by returning false
 
     const uint8_t cmd = _current.payload[0];
+
+    // Boot hold-off: a modem that has never answered is not warned about until
+    // the grace period is over. The request is still counted as unanswered
+    // only after that, so warnings then start fresh.
+    if (!_ever_replied && std::chrono::steady_clock::now() - _started < NO_REPLY_GRACE) {
+        log_debug("Modem %s: no reply to diag %s yet (starting up, magic 0x%04x)",
+                  label().c_str(),
+                  cmd == CMD_WRITE ? "write" : "read",
+                  _current_magic);
+        _read_failed();
+        _complete_request();
+        return false;
+    }
+
     _no_reply_count++;
     if (_no_reply_count < NO_REPLY_WARN_LIMIT) {
         log_warning("Modem %s: no reply to diag %s (magic 0x%04x)",
@@ -404,6 +424,7 @@ void ModemDiag::_handle_packet(const uint8_t *pkt, size_t len)
         return;
     }
 
+    _ever_replied = true;
     const bool recovered = _no_reply_count >= NO_REPLY_WARN_LIMIT;
     _no_reply_count = 0;
     if (recovered) {
@@ -506,7 +527,10 @@ void ModemDiag::_handle_read_reply(uint8_t control, const uint8_t *data, size_t 
                 const int temperature = value - TEMPERATURE_OFFSET;
                 // Info only on change, so the periodic read doesn't log every time
                 if (temperature != _temperature_c) {
-                    log_info("Modem %s: Temperature %d C", label().c_str(), temperature);
+                    log_info("%sModem %s: Temperature %d C",
+                             Log::yellow(),
+                             label().c_str(),
+                             temperature);
                 } else {
                     log_debug("Modem %s: Temperature %d C", label().c_str(), temperature);
                 }
@@ -543,7 +567,7 @@ void ModemDiag::_set_power_dbm(int dbm)
     }
 
     if (dbm != POWER_UNKNOWN) {
-        log_info("Modem %s: Power Output %d dBm", label().c_str(), dbm);
+        log_debug("Modem %s: Power Output %d dBm", label().c_str(), dbm);
 
         if (!_writes_enabled && dbm != _normal_dbm) {
             log_warning("Modem %s: Power Output %d dBm differs from NormalPower %d dBm, "
@@ -565,7 +589,11 @@ void ModemDiag::_check_target()
     }
 
     if (_power_dbm == _target_dbm) {
-        log_info("Modem %s: Power Output %d dBm confirmed", label().c_str(), _target_dbm);
+        log_info("%s > Modem %s: %-8s - %d dBm",
+                 Log::green(),
+                 label().c_str(),
+                 _target_boost ? "Enabled" : "Disabled",
+                 _target_dbm);
         _target_dbm = POWER_UNKNOWN;
         return;
     }

@@ -316,8 +316,8 @@ void Mainloop::set_modem_power(bool boost, bool only_mismatched)
             && (modem->power_dbm() == ModemDiag::POWER_UNKNOWN || modem->power_dbm() == dbm)) {
             continue;
         }
-        log_info(" > Modem %s: %s - %d dBm", modem->label().c_str(), boost ? "Enable " : "Disable", dbm);
-        modem->set_power(static_cast<uint8_t>(dbm));
+        log_info(" > Modem %s: %-8s - %d dBm", modem->label().c_str(), boost ? "Enable" : "Disable", dbm);
+        modem->set_power(static_cast<uint8_t>(dbm), boost);
     }
 }
 

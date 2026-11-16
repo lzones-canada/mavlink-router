@@ -61,6 +61,16 @@ const char *Log::_get_color(Level level)
     return nullptr;
 }
 
+const char *Log::green()
+{
+    return _show_colors ? "\033[32m" : "";
+}
+
+const char *Log::yellow()
+{
+    return _show_colors ? COLOR_YELLOW : "";
+}
+
 int Log::open(Backend backend)
 {
     assert_or_return(_target_fd < 0, -1);

@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <chrono>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
@@ -89,7 +90,8 @@ public:
 
     // Write the immediate output power (par 29), then read it back to confirm.
     // Retries a few times if the read-back value doesn't match.
-    void set_power(uint8_t dbm);
+    // "boost" only selects the Enabled/Disabled wording of the confirmation.
+    void set_power(uint8_t dbm, bool boost);
 
     // Read the immediate output power (par 29), the power the modem uses
     // after a reset (par 3) and the temperature (par 55).
@@ -175,12 +177,15 @@ private:
     // logged at debug level (e.g. SITL or bench runs without a modem attached).
     static constexpr int NO_REPLY_WARN_LIMIT = 3;
     int _no_reply_count = 0;
+    bool _ever_replied = false; // any valid reply since startup
+    std::chrono::steady_clock::time_point _started = std::chrono::steady_clock::now();
 
     std::vector<uint8_t> _rx;
 
     int _power_dbm = POWER_UNKNOWN;
     int _target_dbm = POWER_UNKNOWN; // set_power() value still being confirmed
     int _attempts = 0;
+    bool _target_boost = false;      // wording of the confirmation for _target_dbm
 
     std::string _firmware_version;
     modem_diag::FirmwareNumbers _firmware_numbers{};

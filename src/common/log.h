@@ -45,6 +45,11 @@ public:
     static Level get_max_level() _pure_ { return _max_level; }
     static void set_max_level(Level level);
 
+    /* Green start-of-line escape for success messages; "" when colors are off.
+     * The log line's trailing reset ends it. */
+    static const char *green() _pure_;
+    static const char *yellow() _pure_;
+
     static void logv(Level level, const char *format, va_list ap);
     static void log(Level level, const char *format, ...) _printf_format_(2, 3);
 
