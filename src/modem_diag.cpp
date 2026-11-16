@@ -501,7 +501,8 @@ void ModemDiag::_handle_read_reply(uint8_t control, const uint8_t *data, size_t 
             const size_t n = static_cast<const uint8_t *>(nul) - (data + i);
             std::string &dst = (par == PAR_VERSION) ? _firmware_version : _product;
             dst.assign(reinterpret_cast<const char *>(data + i), n);
-            log_info("Modem %s: %s %s",
+            log_info("%sModem %s: %s %s",
+                     Log::green(),
                      label().c_str(),
                      par == PAR_VERSION ? "Firmware Version" : "Product",
                      dst.c_str());
@@ -522,7 +523,7 @@ void ModemDiag::_handle_read_reply(uint8_t control, const uint8_t *data, size_t 
             if (par == PAR_POWER_IMMEDIATE) {
                 power = value;
             } else if (par == PAR_POWER_AFTER_RESET) {
-                log_info("Modem %s: Power After Reset %u dBm", label().c_str(), value);
+                log_info("%sModem %s: Power Configured %u dBm", Log::green(), label().c_str(), value);
             } else if (par == PAR_TEMPERATURE) {
                 const int temperature = value - TEMPERATURE_OFFSET;
                 // Info only on change, so the periodic read doesn't log every time
@@ -537,7 +538,7 @@ void ModemDiag::_handle_read_reply(uint8_t control, const uint8_t *data, size_t 
                 _temperature_c = temperature;
             } else {
                 _hw_revision = value;
-                log_info("Modem %s: Hardware Revision %d", label().c_str(), _hw_revision);
+                log_info("%sModem %s: Hardware Revision %d", Log::green(), label().c_str(), _hw_revision);
             }
         } else {
             log_warning("Modem %s: unexpected par %u in diag reply", label().c_str(), par);
